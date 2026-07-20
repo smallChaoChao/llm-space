@@ -11,6 +11,13 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@llm-space/ui/ui/resizable";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@llm-space/ui/ui/select";
 import { FileTextIcon, GitBranchIcon } from "lucide-react";
 import {
   lazy,
@@ -24,6 +31,7 @@ import {
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
+import { listRuntimes } from "@/client/remote-servers";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
 import { useExperimental } from "@/components/experimental-provider";
@@ -47,6 +55,7 @@ import {
 } from "@/lib/import-threads";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
+import type { RuntimeId, RuntimeView } from "@/shared/runtime";
 import type { TraceRecord } from "@/shared/traces";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
@@ -252,8 +261,29 @@ function PageInner() {
   // The thread path being shared (a specific file, or the resolved active tab).
   const shareTargetRef = useRef("");
   const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
+  const [workspaceRuntimeId, setWorkspaceRuntimeId] =
+    useState<RuntimeId>("local");
+  const [runtimes, setRuntimes] = useState<RuntimeView[]>([]);
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void listRuntimes()
+      .then((next) => {
+        if (cancelled) return;
+        setRuntimes(next);
+        if (!next.some((runtime) => runtime.id === workspaceRuntimeId)) {
+          setWorkspaceRuntimeId("local");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceRuntimeId]);
 
   // File import: a hidden picker (opened by the `importFiles` command), the
   // parent directory it should import into, and page-wide drag-and-drop state.
@@ -316,13 +346,15 @@ function PageInner() {
     },
     openCommandPalette: () => setCommandPaletteOpen(true),
     openOnboard: () => setOnboardOpen(true),
-    openStartFromExample: ({ parent = "" }) => {
+    openStartFromExample: ({ parent = "", runtimeId }) => {
+      if (runtimeId && runtimeId !== workspaceRuntimeId) return;
       examplesParentRef.current = parent;
       setExamplesOpen(true);
     },
     // Share a specific thread, or the active thread when no path is given (the
     // header button / native menu / palette). The active tab id is `thread:{path}`.
-    shareThread: ({ path }) => {
+    shareThread: ({ path, runtimeId }) => {
+      if (runtimeId && runtimeId !== workspaceRuntimeId) return;
       const activeId = activeTabIdRef.current;
       const target =
         path ??
@@ -333,7 +365,8 @@ function PageInner() {
       shareTargetRef.current = target;
       setShareOpen(true);
     },
-    importFiles: ({ parent = "", files }) => {
+    importFiles: ({ parent = "", files, runtimeId }) => {
+      if (runtimeId && runtimeId !== workspaceRuntimeId) return;
       if (files) {
         void handleImportFiles(files, parent);
         return;
@@ -384,20 +417,27 @@ function PageInner() {
     [executeCommand]
   );
   const handleRevealFile = useCallback(
-    (path: string) => executeCommand({ type: "revealFile", args: { path } }),
+    (path: string, runtimeId: RuntimeId) =>
+      executeCommand({ type: "revealFile", args: { path, runtimeId } }),
     [executeCommand]
   );
   const handleMoveToTrash = useCallback(
-    (path: string) => executeCommand({ type: "deleteFile", args: { path } }),
+    (path: string, runtimeId: RuntimeId) =>
+      executeCommand({ type: "deleteFile", args: { path, runtimeId } }),
     [executeCommand]
   );
   const handleShareThread = useCallback(
-    (path: string) => executeCommand({ type: "shareThread", args: { path } }),
+    (path: string, runtimeId: RuntimeId) =>
+      executeCommand({ type: "shareThread", args: { path, runtimeId } }),
     [executeCommand]
   );
   const handleNewFile = useCallback(
-    () => executeCommand({ type: "newFile", args: {} }),
-    [executeCommand]
+    () =>
+      executeCommand({
+        type: "newFile",
+        args: { runtimeId: workspaceRuntimeId },
+      }),
+    [executeCommand, workspaceRuntimeId]
   );
   const handleToggleSidebar = useCallback(
     () => executeCommand({ type: "toggleSidebar", args: {} }),
@@ -470,6 +510,7 @@ function PageInner() {
             }}
           >
             <FileSystemTreeView
+              runtimeId={workspaceRuntimeId}
               className={
                 effectiveSidebarMode === "files" ? "min-h-0 flex-1" : "hidden"
               }
@@ -507,7 +548,7 @@ function PageInner() {
                 onNewFile={() =>
                   executeCommand({
                     type: "newFile",
-                    args: {},
+                    args: { runtimeId: workspaceRuntimeId },
                   })
                 }
                 onModels={() =>
@@ -537,7 +578,42 @@ function PageInner() {
                 onMove={tabs.handleMove}
                 onTraceTitleChange={tabs.handleTraceTitleChange}
                 onToggleSidebar={handleToggleSidebar}
-                toolbarSlot={<UpdateIndicator />}
+                toolbarSlot={
+                  <>
+                    <Select
+                      value={workspaceRuntimeId}
+                      onValueChange={(value) =>
+                        setWorkspaceRuntimeId(value as RuntimeId)
+                      }
+                    >
+                      <SelectTrigger
+                        className="h-7 w-36 text-xs"
+                        aria-label="Workspace runtime"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(runtimes.length
+                          ? runtimes
+                          : [
+                              {
+                                id: "local",
+                                name: "Local",
+                                kind: "local",
+                                status: "connected",
+                                capabilities: [],
+                              } satisfies RuntimeView,
+                            ]
+                        ).map((runtime) => (
+                          <SelectItem key={runtime.id} value={runtime.id}>
+                            {runtime.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <UpdateIndicator />
+                  </>
+                }
               />
             )}
           </ResizablePanel>
@@ -582,6 +658,7 @@ function PageInner() {
               args: {
                 exampleId: example.id,
                 parent: examplesParentRef.current,
+                runtimeId: workspaceRuntimeId,
               },
             })
           }

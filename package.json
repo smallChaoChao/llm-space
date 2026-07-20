@@ -19,8 +19,9 @@
     "test": "bun test",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint --max-warnings 0 .",
     "lint:fix": "NODE_OPTIONS=--max-old-space-size=8192 eslint --fix .",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
-    "prepare": "husky"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p apps/desktop/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json",
+    "prepare": "husky",
+    "dev:server": "bun --filter @llm-space/server dev"
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}": "eslint --fix"

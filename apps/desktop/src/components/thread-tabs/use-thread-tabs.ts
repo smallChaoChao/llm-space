@@ -10,13 +10,15 @@ import {
 import { threadTitleFromPath } from "@llm-space/ui/lib/thread-file";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { localFs, traceClient } from "@/client";
+import { createFileSystemClient, traceClient } from "@/client";
+import type { RuntimeId } from "@/shared/runtime";
 
 /** An open workspace thread tab. `id` is stable as `thread:{path}`. */
 export interface ThreadTab {
   id: string;
   type: "thread";
   path: string;
+  runtimeId: RuntimeId;
   /** Stable editor identity that survives path rewrites. */
   paneId: string;
   /** Bumped by `refresh(id)` to force the pane to reload from disk. */
@@ -37,7 +39,7 @@ export interface TraceTab {
 export type AppTab = ThreadTab | TraceTab;
 
 type PersistedTab =
-  | { type: "thread"; path: string }
+  | { type: "thread"; path: string; runtimeId?: RuntimeId }
   | { type: "trace"; projectId: string; traceKey: string; title?: string };
 
 /** Derive a tab label from an app tab. */
@@ -54,7 +56,7 @@ export interface ThreadTabs {
    * Open a workspace thread path, adding it if absent and focusing it. Callers
    * already know the file exists; a stale path reports as a pane read error.
    */
-  open: (path: string) => void;
+  open: (path: string, runtimeId?: RuntimeId) => void;
   /**
    * Open an imported trace workbench, adding it if absent and focusing it. The
    * trace must already be listed by the Trace Panel or restorable from storage.
@@ -81,9 +83,9 @@ export interface ThreadTabs {
   /** Reload the tab's backing file/workbench, discarding unsaved local edits. */
   refresh: (id: string) => void;
   /** File-tree delete: close open thread tabs at or beneath `removed`. */
-  handleRemove: (removed: string) => void;
+  handleRemove: (removed: string, runtimeId?: RuntimeId) => void;
   /** File-tree rename/move: rewrite open thread tab paths under `from` to `to`. */
-  handleMove: (from: string, to: string) => void;
+  handleMove: (from: string, to: string, runtimeId?: RuntimeId) => void;
   /** Consume the marker that prevents an overwritten editor from writing back. */
   consumeDiscardedPane: (paneId: string) => boolean;
   /** Trace metadata edit: update labels for already-open trace tabs. */
@@ -99,19 +101,23 @@ export interface ThreadTabs {
   reopenClosed: () => void;
 }
 
-function _threadTabId(path: string): string {
-  return `thread:${path}`;
+function _threadTabId(path: string, runtimeId: RuntimeId = "local"): string {
+  return `thread:${runtimeId}:${path}`;
 }
 
 function _traceTabId(projectId: string, traceKey: string): string {
   return `trace:${projectId}:${traceKey}`;
 }
 
-function _createThreadTab(path: string): ThreadTab {
+function _createThreadTab(
+  path: string,
+  runtimeId: RuntimeId = "local"
+): ThreadTab {
   return {
-    id: _threadTabId(path),
+    id: _threadTabId(path, runtimeId),
     type: "thread",
     path,
+    runtimeId,
     paneId: `thread-pane:${uuid()}`,
   };
 }
@@ -136,7 +142,7 @@ function _createTraceTab({
 
 function _persistable(tab: AppTab): PersistedTab {
   return tab.type === "thread"
-    ? { type: "thread", path: tab.path }
+    ? { type: "thread", path: tab.path, runtimeId: tab.runtimeId }
     : {
         type: "trace",
         projectId: tab.projectId,
@@ -147,7 +153,7 @@ function _persistable(tab: AppTab): PersistedTab {
 
 function _fromPersisted(tab: PersistedTab): AppTab | null {
   if (tab.type === "thread" && tab.path) {
-    return _createThreadTab(tab.path);
+    return _createThreadTab(tab.path, tab.runtimeId ?? "local");
   }
   if (tab.type === "trace" && tab.projectId && tab.traceKey) {
     return _createTraceTab({
@@ -193,7 +199,7 @@ function _loadPersistedTabs(): AppTab[] {
       ? _dedupeTabs(
           legacy
             .filter((path): path is string => typeof path === "string")
-            .map(_createThreadTab)
+            .map((path) => _createThreadTab(path, "local"))
         )
       : [];
   } catch {
@@ -213,7 +219,7 @@ function _loadPersistedActive(tabs: AppTab[]): string | null {
     const active = readLocalStorage(LOCAL_STORAGE_KEYS.activeTab);
     if (!active) return tabs[0]?.id ?? null;
     if (tabs.some((tab) => tab.id === active)) return active;
-    const legacyThreadId = _threadTabId(active);
+    const legacyThreadId = _threadTabId(active, "local");
     return tabs.some((tab) => tab.id === legacyThreadId)
       ? legacyThreadId
       : (tabs[0]?.id ?? null);
@@ -234,11 +240,14 @@ function _isUnder(path: string, base: string): boolean {
   return path === base || path.startsWith(`${base}/`);
 }
 
-async function _threadFileExists(path: string): Promise<boolean> {
+async function _threadFileExists(
+  path: string,
+  runtimeId: RuntimeId
+): Promise<boolean> {
   const slash = path.lastIndexOf("/");
   const parent = slash === -1 ? "" : path.slice(0, slash);
   try {
-    const siblings = await localFs.ls(parent);
+    const siblings = await createFileSystemClient(runtimeId).ls(parent);
     return siblings.some((n) => n.path === path && n.type === "file");
   } catch {
     return false;
@@ -256,7 +265,7 @@ async function _traceExists(tab: TraceTab): Promise<boolean> {
 
 async function _tabExists(tab: AppTab): Promise<boolean> {
   return tab.type === "thread"
-    ? _threadFileExists(tab.path)
+    ? _threadFileExists(tab.path, tab.runtimeId)
     : _traceExists(tab);
 }
 
@@ -318,8 +327,8 @@ export function useThreadTabs(): ThreadTabs {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only restoration check; reads the initial activeId, must not re-run when it changes
   }, []);
 
-  const open = useCallback((path: string) => {
-    const id = _threadTabId(path);
+  const open = useCallback((path: string, runtimeId: RuntimeId = "local") => {
+    const id = _threadTabId(path, runtimeId);
     if (tabsRef.current.some((tab) => tab.id === id)) {
       setActiveId(id);
       return;
@@ -327,7 +336,7 @@ export function useThreadTabs(): ThreadTabs {
     setTabs((prev) =>
       prev.some((tab) => tab.id === id)
         ? prev
-        : [...prev, _createThreadTab(path)]
+        : [...prev, _createThreadTab(path, runtimeId)]
     );
     setActiveId(id);
   }, []);
@@ -454,76 +463,93 @@ export function useThreadTabs(): ThreadTabs {
     });
   }, []);
 
-  const handleRemove = useCallback((removed: string) => {
-    setTabs((prev) => {
-      const next = prev.filter(
-        (tab) => tab.type !== "thread" || !_isUnder(tab.path, removed)
-      );
-      if (next.length === prev.length) return prev;
-      setActiveId((current) =>
-        current !== null &&
-        prev.some(
+  const handleRemove = useCallback(
+    (removed: string, runtimeId: RuntimeId = "local") => {
+      setTabs((prev) => {
+        const next = prev.filter(
           (tab) =>
-            tab.id === current &&
-            tab.type === "thread" &&
-            _isUnder(tab.path, removed)
-        )
-          ? (next[next.length - 1]?.id ?? null)
-          : current
-      );
-      return next;
-    });
-  }, []);
-
-  const handleMove = useCallback((from: string, to: string) => {
-    const rewrite = (p: string): string =>
-      p === from ? to : _isUnder(p, from) ? to + p.slice(from.length) : p;
-
-    const currentTabs = tabsRef.current;
-    const sourceTabs = currentTabs.filter(
-      (tab): tab is ThreadTab =>
-        tab.type === "thread" && _isUnder(tab.path, from)
-    );
-    const destinationTabs = currentTabs.filter(
-      (tab): tab is ThreadTab => tab.type === "thread" && _isUnder(tab.path, to)
-    );
-    const sourceIsOpen = sourceTabs.length > 0;
-
-    if (sourceIsOpen) {
-      for (const tab of destinationTabs) {
-        discardedPaneIds.current.add(tab.paneId);
-      }
-    }
-
-    setTabs((prev) => {
-      const next = prev.flatMap((tab): AppTab[] => {
-        if (tab.type !== "thread") return [tab];
-        if (_isUnder(tab.path, from)) {
-          const path = rewrite(tab.path);
-          return [{ ...tab, id: _threadTabId(path), path }];
-        }
-        if (!_isUnder(tab.path, to)) return [tab];
-        if (sourceIsOpen) return [];
-        return [{ ...tab, refreshNonce: (tab.refreshNonce ?? 0) + 1 }];
+            tab.type !== "thread" ||
+            tab.runtimeId !== runtimeId ||
+            !_isUnder(tab.path, removed)
+        );
+        if (next.length === prev.length) return prev;
+        setActiveId((current) =>
+          current !== null &&
+          prev.some(
+            (tab) =>
+              tab.id === current &&
+              tab.type === "thread" &&
+              tab.runtimeId === runtimeId &&
+              _isUnder(tab.path, removed)
+          )
+            ? (next[next.length - 1]?.id ?? null)
+            : current
+        );
+        return next;
       });
-      return _dedupeTabs(next);
-    });
-    setActiveId((current) => {
-      const activeTab = currentTabs.find((tab) => tab.id === current);
-      if (activeTab?.type !== "thread") return current;
-      if (_isUnder(activeTab.path, from)) {
-        return _threadTabId(rewrite(activeTab.path));
-      }
-      if (!_isUnder(activeTab.path, to) || !sourceIsOpen) return current;
+    },
+    []
+  );
 
-      const replacement = sourceTabs.find(
-        (tab) => rewrite(tab.path) === activeTab.path
+  const handleMove = useCallback(
+    (from: string, to: string, runtimeId: RuntimeId = "local") => {
+      const rewrite = (p: string): string =>
+        p === from ? to : _isUnder(p, from) ? to + p.slice(from.length) : p;
+
+      const currentTabs = tabsRef.current;
+      const sourceTabs = currentTabs.filter(
+        (tab): tab is ThreadTab =>
+          tab.type === "thread" &&
+          tab.runtimeId === runtimeId &&
+          _isUnder(tab.path, from)
       );
-      return replacement
-        ? _threadTabId(rewrite(replacement.path))
-        : _threadTabId(rewrite(sourceTabs[0].path));
-    });
-  }, []);
+      const destinationTabs = currentTabs.filter(
+        (tab): tab is ThreadTab =>
+          tab.type === "thread" &&
+          tab.runtimeId === runtimeId &&
+          _isUnder(tab.path, to)
+      );
+      const sourceIsOpen = sourceTabs.length > 0;
+
+      if (sourceIsOpen) {
+        for (const tab of destinationTabs) {
+          discardedPaneIds.current.add(tab.paneId);
+        }
+      }
+
+      setTabs((prev) => {
+        const next = prev.flatMap((tab): AppTab[] => {
+          if (tab.type !== "thread" || tab.runtimeId !== runtimeId)
+            return [tab];
+          if (_isUnder(tab.path, from)) {
+            const path = rewrite(tab.path);
+            return [{ ...tab, id: _threadTabId(path, tab.runtimeId), path }];
+          }
+          if (!_isUnder(tab.path, to)) return [tab];
+          if (sourceIsOpen) return [];
+          return [{ ...tab, refreshNonce: (tab.refreshNonce ?? 0) + 1 }];
+        });
+        return _dedupeTabs(next);
+      });
+      setActiveId((current) => {
+        const activeTab = currentTabs.find((tab) => tab.id === current);
+        if (activeTab?.type !== "thread" || activeTab.runtimeId !== runtimeId)
+          return current;
+        if (_isUnder(activeTab.path, from)) {
+          return _threadTabId(rewrite(activeTab.path), activeTab.runtimeId);
+        }
+        if (!_isUnder(activeTab.path, to) || !sourceIsOpen) return current;
+
+        const replacement = sourceTabs.find(
+          (tab) => rewrite(tab.path) === activeTab.path
+        );
+        return replacement
+          ? _threadTabId(rewrite(replacement.path), replacement.runtimeId)
+          : _threadTabId(rewrite(sourceTabs[0].path), sourceTabs[0].runtimeId);
+      });
+    },
+    []
+  );
 
   const consumeDiscardedPane = useCallback((paneId: string) => {
     if (!discardedPaneIds.current.has(paneId)) return false;

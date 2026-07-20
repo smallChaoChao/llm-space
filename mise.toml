@@ -42,6 +42,10 @@ run = "bun run dev:cef"
 description = "Run the static web app (landing page + shared-thread viewer) on :5175"
 run = "bun run dev:web"
 
+[tasks."dev:server"]
+description = "Run the headless LLM Space runtime server"
+run = "bun run dev:server"
+
 [tasks.test]
 description = "Run all Bun tests"
 run = "bun run test"
