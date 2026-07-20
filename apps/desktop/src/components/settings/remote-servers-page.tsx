@@ -1,9 +1,18 @@
 "use client";
 
+import { cn } from "@llm-space/ui/lib/utils";
 import { Button } from "@llm-space/ui/ui/button";
 import { Input } from "@llm-space/ui/ui/input";
 import { Separator } from "@llm-space/ui/ui/separator";
-import { useCallback, useEffect, useState } from "react";
+import {
+  CheckCircle2,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Server,
+  Trash2,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -12,7 +21,6 @@ import {
   disconnectRemoteServer,
   listRemoteServers,
   removeRemoteServer,
-  setDefaultRuntime,
   updateRemoteServer,
 } from "@/client/remote-servers";
 import type {
@@ -35,25 +43,41 @@ interface FormState {
   localPort: string;
 }
 
-const EMPTY_FORM: FormState = {
-  name: "",
-  host: "",
-  user: "",
-  port: "22",
-  identityFile: "",
-  remoteRepo: "",
-  remoteHome: "~/.llm-space-server",
-  remoteServerPort: "39123",
-  localPort: "",
-};
+const DEFAULT_REMOTE_HOME = "/tmp/llm-space-server-ui-test";
+
+function _emptyForm(): FormState {
+  return {
+    name: "",
+    host: "",
+    user: "",
+    port: "22",
+    identityFile: "",
+    remoteRepo: "",
+    remoteHome: DEFAULT_REMOTE_HOME,
+    remoteServerPort: "39123",
+    localPort: "",
+  };
+}
 
 export function RemoteServersPage() {
   const [servers, setServers] = useState<RemoteServerView[]>([]);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const selected = useMemo(
+    () => servers.find((server) => server.id === selectedId) ?? null,
+    [selectedId, servers]
+  );
+
   const refresh = useCallback(async () => {
-    setServers(await listRemoteServers());
+    const next = await listRemoteServers();
+    setServers(next);
+    setSelectedId((current) =>
+      current && next.some((server) => server.id === current)
+        ? current
+        : (next[0]?.id ?? null)
+    );
   }, []);
 
   useEffect(() => {
@@ -66,14 +90,16 @@ export function RemoteServersPage() {
   }, [refresh]);
 
   const save = async () => {
+    if (!form) return;
     try {
       const draft = _draft(form);
-      setServers(
-        form.id
-          ? await updateRemoteServer(form.id, draft)
-          : await addRemoteServer(draft)
-      );
-      setForm(EMPTY_FORM);
+      const next = form.id
+        ? await updateRemoteServer(form.id, draft)
+        : await addRemoteServer(draft);
+      setServers(next);
+      const nextId = form.id ?? next.at(-1)?.id ?? null;
+      setSelectedId(nextId);
+      setForm(null);
       toast.success("Remote server saved");
     } catch (error) {
       toast.error("Failed to save remote server", {
@@ -89,7 +115,9 @@ export function RemoteServersPage() {
   ) => {
     setBusyId(id);
     try {
-      setServers(await action(id));
+      const next = await action(id);
+      setServers(next);
+      setSelectedId(id);
     } catch (error) {
       toast.error("Remote server action failed", {
         description:
@@ -100,167 +128,288 @@ export function RemoteServersPage() {
     }
   };
 
+  const startAdd = () => {
+    setSelectedId(null);
+    setForm(_emptyForm());
+  };
+
+  const startEdit = (server: RemoteServerView) => {
+    setSelectedId(server.id);
+    setForm(_form(server));
+  };
+
   return (
     <SettingsPage
       title="Remote Servers"
-      description="Configure SSH remote runtimes. The remote machine must already have this repository and dependencies installed."
+      description="Connect LLM Space to a prepared SSH server. Passwords and passphrases are not stored."
+      className="p-0"
     >
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-6">
-        <div className="space-y-3">
-          {servers.length === 0 ? (
-            <div className="text-muted-foreground rounded-lg border border-dashed p-6 text-sm">
-              No remote servers configured.
+      <div className="grid h-full min-h-0 grid-cols-[280px_minmax(0,1fr)] border-t">
+        <aside className="bg-muted/20 flex min-h-0 flex-col border-r">
+          <div className="flex h-11 items-center justify-between px-3">
+            <span className="text-sm font-medium">Servers</span>
+            <div className="flex gap-1">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Refresh remote servers"
+                onClick={() => void refresh()}
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Add remote server"
+                onClick={startAdd}
+              >
+                <Plus className="size-4" />
+              </Button>
             </div>
-          ) : (
-            servers.map((server) => (
-              <div key={server.id} className="rounded-lg border p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-medium">{server.name}</div>
-                    <div className="text-muted-foreground truncate text-xs">
-                      {server.user ? `${server.user}@` : ""}
-                      {server.host}:{server.port}
-                    </div>
-                    <div className="text-muted-foreground mt-1 text-xs">
-                      Runtime: <code>{server.runtimeId}</code>
-                    </div>
-                    {server.error ? (
-                      <div className="text-destructive mt-1 text-xs">
-                        {server.error}
-                      </div>
-                    ) : null}
-                  </div>
-                  <span className="text-muted-foreground text-xs capitalize">
-                    {server.defaultRuntime ? "default · " : ""}
-                    {server.status}
-                  </span>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={
-                      busyId === server.id || server.status === "connected"
-                    }
-                    onClick={() => void run(server.id, connectRemoteServer)}
-                  >
-                    Connect
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={
-                      busyId === server.id || server.status !== "connected"
-                    }
-                    onClick={() => void run(server.id, disconnectRemoteServer)}
-                  >
-                    Disconnect
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={server.status !== "connected"}
-                    onClick={() =>
-                      void run(server.id, () =>
-                        setDefaultRuntime(server.runtimeId)
-                      )
-                    }
-                  >
-                    Set default
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={server.status === "connected"}
-                    onClick={() => setForm(_form(server))}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busyId === server.id}
-                    onClick={() => void run(server.id, removeRemoteServer)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="space-y-3 rounded-lg border p-3">
-          <div className="text-sm font-medium">
-            {form.id ? "Edit server" : "Add server"}
           </div>
-          <Field
-            label="Name"
-            value={form.name}
-            onChange={(name) => setForm({ ...form, name })}
-          />
-          <Field
-            label="Host"
-            value={form.host}
-            onChange={(host) => setForm({ ...form, host })}
-          />
-          <Field
-            label="User"
-            value={form.user}
-            onChange={(user) => setForm({ ...form, user })}
-          />
+          <Separator />
+          <div className="min-h-0 flex-1 overflow-auto p-2">
+            {servers.length === 0 ? (
+              <div className="text-muted-foreground p-4 text-sm">
+                No remote servers. Click + to add one.
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {servers.map((server) => (
+                  <button
+                    key={server.id}
+                    type="button"
+                    className={cn(
+                      "hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-2 text-left",
+                      selectedId === server.id && "bg-accent"
+                    )}
+                    onClick={() => {
+                      setSelectedId(server.id);
+                      setForm(null);
+                    }}
+                  >
+                    <Server className="text-muted-foreground size-4 shrink-0" />
+                    <span className="min-w-0 grow">
+                      <span className="block truncate text-sm font-medium">
+                        {server.name}
+                      </span>
+                      <span className="text-muted-foreground block truncate text-xs">
+                        {server.user ? `${server.user}@` : ""}
+                        {server.host}:{server.port}
+                      </span>
+                    </span>
+                    {server.status === "connected" ? (
+                      <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+                    ) : busyId === server.id ||
+                      server.status === "connecting" ? (
+                      <Loader2 className="size-4 shrink-0 animate-spin" />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+
+        <section className="min-h-0 overflow-auto p-5">
+          {form ? (
+            <RemoteServerForm
+              form={form}
+              onChange={setForm}
+              onCancel={() => setForm(null)}
+              onSave={() => void save()}
+            />
+          ) : selected ? (
+            <RemoteServerDetails
+              server={selected}
+              busy={busyId === selected.id}
+              onConnect={() => void run(selected.id, connectRemoteServer)}
+              onDisconnect={() => void run(selected.id, disconnectRemoteServer)}
+              onEdit={() => startEdit(selected)}
+              onRemove={() => void run(selected.id, removeRemoteServer)}
+            />
+          ) : (
+            <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
+              Select a server or click + to add one.
+            </div>
+          )}
+        </section>
+      </div>
+    </SettingsPage>
+  );
+}
+
+function RemoteServerDetails({
+  server,
+  busy,
+  onConnect,
+  onDisconnect,
+  onEdit,
+  onRemove,
+}: {
+  server: RemoteServerView;
+  busy: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col gap-4">
+      <div>
+        <h3 className="text-base font-medium">{server.name}</h3>
+        <p className="text-muted-foreground text-sm">
+          {server.user ? `${server.user}@` : ""}
+          {server.host}:{server.port}
+        </p>
+      </div>
+      <div className="grid gap-2 rounded-lg border p-3 text-sm">
+        <Info label="Status" value={server.status} />
+        <Info label="Runtime" value={server.runtimeId} />
+        <Info label="Remote repo" value={server.remoteRepo} />
+        <Info label="Remote home" value={server.remoteHome} />
+        <Info label="Server port" value={String(server.remoteServerPort)} />
+        <Info
+          label="Local port"
+          value={server.localPort ? String(server.localPort) : "Auto"}
+        />
+      </div>
+      {server.error ? (
+        <p className="text-destructive text-sm">{server.error}</p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {server.status === "connected" ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={onDisconnect}
+          >
+            Disconnect
+          </Button>
+        ) : (
+          <Button size="sm" disabled={busy} onClick={onConnect}>
+            Connect
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={server.status === "connected"}
+          onClick={onEdit}
+        >
+          Edit
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onRemove}>
+          <Trash2 className="size-4" />
+          Remove
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RemoteServerForm({
+  form,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  form: FormState;
+  onChange: (form: FormState) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const withDefaults = (next: FormState): FormState => {
+    const remoteRepo = next.remoteRepo || _defaultRepo(next.user);
+    return { ...next, remoteRepo };
+  };
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col gap-4">
+      <div>
+        <h3 className="text-base font-medium">
+          {form.id ? "Edit server" : "Add server"}
+        </h3>
+        <p className="text-muted-foreground text-sm">
+          Usually only name, host and user are required for a prepared devbox.
+        </p>
+      </div>
+      <div className="grid gap-3 rounded-lg border p-3">
+        <Field
+          label="Name"
+          value={form.name}
+          onChange={(name) => onChange({ ...form, name })}
+        />
+        <Field
+          label="Host"
+          value={form.host}
+          onChange={(host) => onChange({ ...form, host })}
+        />
+        <Field
+          label="User"
+          value={form.user}
+          onChange={(user) => onChange(withDefaults({ ...form, user }))}
+        />
+      </div>
+      <details className="rounded-lg border p-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          Advanced
+        </summary>
+        <div className="mt-3 grid gap-3">
           <Field
             label="SSH port"
             value={form.port}
-            onChange={(port) => setForm({ ...form, port })}
+            onChange={(port) => onChange({ ...form, port })}
           />
           <Field
             label="Identity file"
             value={form.identityFile}
-            onChange={(identityFile) => setForm({ ...form, identityFile })}
+            onChange={(identityFile) => onChange({ ...form, identityFile })}
           />
-          <Separator />
           <Field
             label="Remote repo"
             value={form.remoteRepo}
-            onChange={(remoteRepo) => setForm({ ...form, remoteRepo })}
+            onChange={(remoteRepo) => onChange({ ...form, remoteRepo })}
           />
           <Field
             label="Remote home"
             value={form.remoteHome}
-            onChange={(remoteHome) => setForm({ ...form, remoteHome })}
+            onChange={(remoteHome) => onChange({ ...form, remoteHome })}
           />
           <Field
             label="Server port"
             value={form.remoteServerPort}
             onChange={(remoteServerPort) =>
-              setForm({ ...form, remoteServerPort })
+              onChange({ ...form, remoteServerPort })
             }
           />
           <Field
             label="Local port"
             value={form.localPort}
-            onChange={(localPort) => setForm({ ...form, localPort })}
+            onChange={(localPort) => onChange({ ...form, localPort })}
           />
-          <div className="flex gap-2 pt-1">
-            <Button size="sm" onClick={() => void save()}>
-              {form.id ? "Update" : "Add"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setForm(EMPTY_FORM)}
-            >
-              Cancel
-            </Button>
-          </div>
-          <p className="text-muted-foreground text-xs">
-            Passwords and passphrases are not stored. Use ssh-agent or an
-            identity file available to OpenSSH.
-          </p>
         </div>
+      </details>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={onSave}>
+          {form.id ? "Update" : "Add"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
       </div>
-    </SettingsPage>
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="truncate">
+        <code>{value}</code>
+      </span>
+    </div>
   );
 }
 
@@ -288,7 +437,7 @@ function _draft(form: FormState): RemoteServerDraft {
     user: form.user || undefined,
     port: _number(form.port),
     identityFile: form.identityFile || undefined,
-    remoteRepo: form.remoteRepo,
+    remoteRepo: form.remoteRepo || _defaultRepo(form.user),
     remoteHome: form.remoteHome || undefined,
     remoteServerPort: _number(form.remoteServerPort),
     localPort: form.localPort ? _number(form.localPort) : undefined,
@@ -316,4 +465,8 @@ function _number(value: string): number | undefined {
   const parsed = Number(trimmed);
   if (!Number.isInteger(parsed)) throw new Error(`Invalid number: ${value}`);
   return parsed;
+}
+
+function _defaultRepo(user: string): string {
+  return user ? `/data00/home/${user}/ai_projects/llm-space` : "~/llm-space";
 }

@@ -62,7 +62,7 @@ export function buildRemoteServerCommand(input: {
     "cd",
     shellQuote(input.remoteRepo),
     "&&",
-    "bun --filter @llm-space/server dev --",
+    "exec bun --filter @llm-space/server dev --",
     "--host",
     shellQuote(input.host),
     "--port",

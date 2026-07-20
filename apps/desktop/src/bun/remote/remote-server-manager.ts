@@ -87,7 +87,9 @@ export class RemoteServerManager {
     this._connections.set(id, { status: "connecting" });
     try {
       const handle = await startSshRemoteRuntime(this._sshConfig(server));
-      this._runtimeRouter.register(this._runtimeId(server.id), handle.client);
+      const runtimeId = this._runtimeId(server.id);
+      this._runtimeRouter.register(runtimeId, handle.client);
+      this._runtimeRouter.setDefaultRuntime(runtimeId);
       this._connections.set(id, { status: "connected", handle });
       return this.listServers();
     } catch (error) {

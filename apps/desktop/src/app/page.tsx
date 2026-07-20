@@ -31,7 +31,7 @@ import {
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
 
-import { listRuntimes } from "@/client/remote-servers";
+import { getDefaultRuntime, listRuntimes } from "@/client/remote-servers";
 import { CommandProvider, useCommands, useRegisterCommands } from "@/commands";
 import { AccountStatus } from "@/components/account-status";
 import { useExperimental } from "@/components/experimental-provider";
@@ -267,23 +267,42 @@ function PageInner() {
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
 
+  const refreshRuntimes = useCallback(
+    async ({ syncDefault }: { syncDefault: boolean }) => {
+      const [next, defaultRuntimeId] = await Promise.all([
+        listRuntimes(),
+        getDefaultRuntime(),
+      ]);
+      setRuntimes(next);
+      setWorkspaceRuntimeId((current) => {
+        if (
+          syncDefault &&
+          next.some((runtime) => runtime.id === defaultRuntimeId)
+        ) {
+          return defaultRuntimeId;
+        }
+        return next.some((runtime) => runtime.id === current)
+          ? current
+          : "local";
+      });
+    },
+    []
+  );
+
   useEffect(() => {
     let cancelled = false;
-    void listRuntimes()
-      .then((next) => {
-        if (cancelled) return;
-        setRuntimes(next);
-        if (!next.some((runtime) => runtime.id === workspaceRuntimeId)) {
-          setWorkspaceRuntimeId("local");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setRuntimes([]);
-      });
+    void refreshRuntimes({ syncDefault: true }).catch(() => {
+      if (!cancelled) setRuntimes([]);
+    });
     return () => {
       cancelled = true;
     };
-  }, [workspaceRuntimeId]);
+  }, [refreshRuntimes]);
+
+  useEffect(() => {
+    if (settingsOpen) return;
+    void refreshRuntimes({ syncDefault: true }).catch(() => undefined);
+  }, [refreshRuntimes, settingsOpen]);
 
   // File import: a hidden picker (opened by the `importFiles` command), the
   // parent directory it should import into, and page-wide drag-and-drop state.

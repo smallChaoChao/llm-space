@@ -3039,3 +3039,119 @@ SSH authentication failed or requires interaction. Configure ssh-agent or use a 
 ---
 
 [2026-07-20 18:45:00+08:00] 修改说明：完成 Milestone 6 第一阶段实现（Remote Servers 配置/RPC/Settings 页面），并记录剩余 runtime-aware workspace/thread 绑定工作。理由：Milestone 6 范围较大，先交付可配置远程服务器的 UI 与 bun 管理层。
+
+---
+
+## Phase 6 修复计划：Remote Servers UI 与 SSH 重连问题
+
+用户在 Milestone 6 验收中发现 5 个问题：
+
+1. 已添加的 devbox 点击 Edit 后，内容填入右侧表单，但点击 Update 后内容看起来没有更新。
+2. 点击 Disconnect 后再次点击 Connect，报 `Failed to start server. Is port 39123 in use?`，说明远端 server 进程或端口未及时清理。
+3. `Set default` 的产品语义不清，用户不理解它的用途，建议删除。
+4. Add server 暴露字段过多，不利于测试和普通用户使用，应默认化高级字段。
+5. Remote 页面视觉不符合 LLM Space 设置页一致性，应参考 MCP tab：左侧列表 + 加号，右侧详情/编辑表单。
+
+### 修复目标
+
+本次修复不扩展 SSH 能力边界，不做 server 包自动安装。只修当前 UI/交互与进程生命周期问题：
+
+- Remote Servers 页面重构为 MCP 风格左右分栏。
+- Add server 默认只要求用户关注 `Name`、`Host`、`User`；高级字段折叠或自动给默认值。
+- 移除 `Set default` 按钮。连接成功后自动把该 remote runtime 设为默认 runtime，页面关闭后 workspace selector 会同步到 remote。
+- Edit/Update 后左侧列表和右侧详情立即刷新，且保持选中更新后的 server。
+- Disconnect 后 remote server 进程尽量释放远端端口；远端启动命令改为 `exec bun ...`，让 ssh session 退出时 bun server 更可靠地收到 SIGHUP/退出。
+
+### 设计细节
+
+#### UI 设计
+
+参考 MCP 页面：
+
+- 左侧：服务器列表、顶部 `+` 按钮、刷新按钮。
+- 右侧：无选择时展示空状态；选择服务器时展示详情；点击 Add/Edit 后展示表单。
+- 列表项显示：name、`user@host:port`、状态 badge。
+- 操作按钮：Connect / Disconnect / Edit / Remove。
+- 移除 `Set default`。连接成功后自动 default。
+
+#### 表单默认值
+
+基础字段：
+
+```text
+Name
+Host
+User
+```
+
+默认字段：
+
+```text
+SSH port: 22
+Identity file: 空（使用 ssh-agent / ~/.ssh/config）
+Remote home: /tmp/llm-space-server-ui-test
+Remote server port: 39123
+Local port: 空（自动选择）
+```
+
+Remote repo 在当前源码运行方案里仍然需要，但放入 Advanced。为降低测试成本，根据 `User` 自动给一个常用默认值：
+
+```text
+/data00/home/<user>/ai_projects/llm-space
+```
+
+如果用户环境不同，可以展开 Advanced 修改。
+
+#### SSH 进程修复
+
+远端启动命令从：
+
+```sh
+cd <repo> && bun --filter @llm-space/server dev -- ...
+```
+
+改为：
+
+```sh
+cd <repo> && exec bun --filter @llm-space/server dev -- ...
+```
+
+理由：`exec` 让远端 shell 被 bun 进程替换，ssh session 关闭时更可靠地终止实际 server，而不是只终止 shell 父进程留下 bun 占用端口。
+
+连接成功后自动：
+
+```ts
+runtimeRouter.setDefaultRuntime(remoteRuntimeId);
+```
+
+断开时如果当前 default 是该 remote，则恢复 local。
+
+### 验收标准
+
+- `bun run typecheck` 零错误。
+- `bun run lint` 零错误。
+- `bun run test` 全部 PASS，0 skipped。
+- 编辑 server 后点击 Update，左侧列表和右侧详情显示新值。
+- Connect 成功后不需要点 Set default，workspace selector 自动切 remote 或页面关闭后同步 remote。
+- Disconnect 后立即 Connect 不再因为同一 remote server 端口残留而失败。
+- Remote 页面视觉改为 MCP 风格左右分栏，普通用户默认只需要填 Name/Host/User。
+
+[2026-07-20 21:10:00+08:00] 修改说明：追加 Phase 6 修复计划，覆盖用户实测发现的 Remote Servers UI 与 SSH 重连问题。理由：这些问题阻碍当前 SSH Remote Runtime 阶段性验收，且属于 Milestone 6 产品化闭环的一部分。
+
+---
+
+## Phase 6 修复记录：Remote Servers UI 与 SSH 重连
+
+- 修复 Edit/Update 交互：Remote Servers 页面改为左侧列表 + 右侧详情/表单；编辑后保存会刷新列表并保持选中当前 server。
+- 移除 `Set default` 按钮：连接成功后自动把该 remote runtime 设置为默认 runtime；断开时如果当前默认是该 remote，则恢复 local。
+- 简化 Add server 表单：默认只展示 Name、Host、User；SSH port、identity file、remote repo、remote home、server port、local port 收进 Advanced。默认 remote home 为 `/tmp/llm-space-server-ui-test`，server port 为 `39123`，local port 自动选择。
+- 修复 Disconnect 后重连端口占用风险：远端 server 启动命令从 `bun --filter ...` 改为 `exec bun --filter ...`，让 SSH session 关闭时更可靠地终止实际 server 进程。
+- Remote 页面视觉调整为 MCP tab 风格：左侧 server 列表和 `+`/refresh 操作，右侧详情或编辑表单。
+
+验证：
+
+- `bun run typecheck`：通过，零错误。
+- `bun run lint`：通过，零错误。
+- `bun run test`：100 pass，0 fail，0 skipped。
+
+[2026-07-20 21:30:00+08:00] 修改说明：完成用户验收反馈中的 Remote Servers 页面和 SSH 重连修复。理由：修复 Edit/Update 不更新、Disconnect 后端口占用、Set default 语义不清、表单复杂、页面风格不一致等问题。
