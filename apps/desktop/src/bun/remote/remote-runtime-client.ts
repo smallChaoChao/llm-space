@@ -188,6 +188,20 @@ export class RemoteRuntimeClient implements RuntimeClient {
     this._activeStreams.clear();
   }
 
+  async shutdownRemote(): Promise<void> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2_000);
+    try {
+      await fetch(`${this._baseUrl}/shutdown`, {
+        method: "POST",
+        headers: this._headers(),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   removeProvider(providerId: string) {
     return this._rpc<ModelProviderGroup[]>("models.removeProvider", {
       providerId,

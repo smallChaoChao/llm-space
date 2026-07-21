@@ -13,6 +13,7 @@ export interface StartHttpServerOptions {
   token: string;
   runtime: ServerRuntimeContext;
   version: string;
+  onShutdown?: () => void;
 }
 
 export function startHttpServer(
@@ -21,43 +22,48 @@ export function startHttpServer(
   const server = Bun.serve({
     hostname: options.host,
     port: options.port,
-    async fetch(request) {
-      try {
-        assertAuthorized(request, options.token);
-        const url = new URL(request.url);
-        if (request.method === "GET" && url.pathname === "/health") {
-          return jsonResponse(_health(options));
-        }
-        if (request.method === "POST" && url.pathname === "/rpc") {
-          return jsonResponse(
-            await handleRuntimeRpc(
-              options.runtime.runtime,
-              await readJson(request)
-            )
-          );
-        }
-        if (request.method === "POST" && url.pathname === "/stream") {
-          return createStreamResponse(
-            options.runtime.runtime,
-            await readJson(request)
-          );
-        }
-        return jsonResponse(
-          {
-            ok: false,
-            error: {
-              code: "not_found",
-              message: `Endpoint not found: ${request.method} ${url.pathname}`,
-            },
-          },
-          { status: 404 }
-        );
-      } catch (error) {
-        return errorResponse(error);
-      }
-    },
+    fetch: createHttpFetchHandler(options),
   });
   return server;
+}
+
+export function createHttpFetchHandler(options: StartHttpServerOptions) {
+  return async function fetchHandler(request: Request): Promise<Response> {
+    try {
+      assertAuthorized(request, options.token);
+      const url = new URL(request.url);
+      if (request.method === "GET" && url.pathname === "/health") {
+        return jsonResponse(_health(options));
+      }
+      if (request.method === "POST" && url.pathname === "/shutdown") {
+        setTimeout(() => options.onShutdown?.(), 0);
+        return jsonResponse({ ok: true });
+      }
+      if (request.method === "POST" && url.pathname === "/rpc") {
+        return jsonResponse(
+          await handleRuntimeRpc(options.runtime.runtime, await readJson(request))
+        );
+      }
+      if (request.method === "POST" && url.pathname === "/stream") {
+        return createStreamResponse(
+          options.runtime.runtime,
+          await readJson(request)
+        );
+      }
+      return jsonResponse(
+        {
+          ok: false,
+          error: {
+            code: "not_found",
+            message: `Endpoint not found: ${request.method} ${url.pathname}`,
+          },
+        },
+        { status: 404 }
+      );
+    } catch (error) {
+      return errorResponse(error);
+    }
+  };
 }
 
 function _health(options: StartHttpServerOptions): ServerHealthResponse {

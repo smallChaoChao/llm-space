@@ -20,12 +20,22 @@ async function main(): Promise<void> {
   }
 
   const runtime = await createServerRuntime(args.home);
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    await server.stop(true);
+    await runtime.stop();
+    process.exit(0);
+  };
+
   const server = startHttpServer({
     host: args.host,
     port: args.port,
     token: args.token,
     runtime,
     version: packageJson.version,
+    onShutdown: () => void stop(),
   });
 
   console.info(
@@ -34,11 +44,6 @@ async function main(): Promise<void> {
   console.info(`home: ${runtime.homePath}`);
   console.info(`workspace: ${runtime.workspacePath}`);
 
-  const stop = async () => {
-    await server.stop(true);
-    await runtime.stop();
-    process.exit(0);
-  };
   process.on("SIGINT", () => void stop());
   process.on("SIGTERM", () => void stop());
 }

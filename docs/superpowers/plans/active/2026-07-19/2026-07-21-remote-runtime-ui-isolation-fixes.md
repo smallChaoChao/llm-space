@@ -34,7 +34,8 @@
 - [x] (2026-07-21 20:08:00+08:00) Milestone 5: 调整 Settings 导航顺序与补齐测试
 - [x] (2026-07-21 20:28:00+08:00) Phase 4.5: 独立代码审计完成，4 个真实发现均已修复
 - [x] (2026-07-21 20:30:00+08:00) Phase 5: 结果汇报完成
-- [ ] Phase 7: 代码提交（等待用户确认是否提交）
+- [x] (2026-07-21 23:15:00+08:00) Phase 7: 代码提交（用户确认后执行）
+- [x] (2026-07-21 23:05:00+08:00) Phase 6: 后续修复完成，处理 disconnect 后 connect 远端 39123 端口占用与 local/remote runtime 切换后 thread tab 未按目标 workspace 重载的问题
 
 ## 意外发现
 
@@ -55,6 +56,13 @@
 
 - 观察：当前 `RemoteServerManager.connectServer()` 只处理同一个 server 的重复连接，没有自动断开其它已连接 SSH remote。
   证据：`apps/desktop/src/bun/remote/remote-server-manager.ts` 中 `connectServer(id)` 只读取 `const existing = this._connections.get(id)`，没有遍历 `_connections` 断开其它 id。
+
+
+- 观察：Disconnect 只关闭本地 SSH 进程，但远端 `bun --filter @llm-space/server dev` 不一定随 SSH session 退出，导致下一次 Connect 仍在远端 39123 启动 server，出现 `Is port 39123 in use?`。
+  证据：`startSshRemoteRuntime().stop()` 只 `client.shutdown()` 和 stop ssh/tunnel 本地进程；远端 server 没有显式 shutdown RPC。
+
+- 观察：从 local Connect 到 remote 时，local thread tab 被保留，导致主窗口仍显示 local 文件内容，不符合“重新从正确位置加载所有配置文件刷新窗口”的产品语义。
+  证据：此前决策只关闭 remote thread tab；`switchWorkspaceRuntime(remote)` 不关闭 `local` runtime tabs。
 
 ## 决策日志
 
@@ -78,6 +86,15 @@
   理由：OpenSSH 这类报错可能是真实中间人攻击。自动删除冲突行是短期方便但长期错误的安全设计。
   日期/作者：2026-07-21 / Codex
 
+
+- 决策：runtime 切换采用“目标 workspace 重新加载”语义：connect remote 时关闭 local 与目标 remote 的旧 thread tabs；disconnect remote 时关闭 remote thread tabs。
+  理由：thread tab 的内容来自某个 runtime 的 workspace 文件。跨 runtime 保留 tab 会让用户看到旧位置的文件，短期保留看似方便，但长期会制造 local/remote 混读和写错位置风险。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：disconnect remote 时先通过远端 `/shutdown` 显式停止 server，再关闭 SSH server/tunnel 进程；shutdown 请求失败不阻塞本地清理。
+  理由：端口占用根因是远端 server 生命周期缺少协议级关闭。依赖 SSH session 退出是隐式副作用，长期不可靠。
+  日期/作者：2026-07-21 / Codex
+
 ## 成果与复盘
 
 - Phase 4.5 独立审计发现 4 个真实问题，均已修复：
@@ -92,6 +109,8 @@
 - Milestone 3 已完成：`useThreadTabs` 新增 `closeRuntime(runtimeId)`；主界面切换离开旧 remote 或断开 remote 时自动关闭对应 remote thread tab，保留 local thread 和 trace tab。
 - Milestone 4 已完成：`RemoteServerManager` 连接新 SSH server 前自动断开其它连接；同一 server 已连接时会切回 default runtime；新增 `ssh-error.ts` 分类 OpenSSH host key 安全错误，toast 文案变为短、准确、可操作。
 - Milestone 5 已完成：Settings 左侧 `Remote` 已移动到 `Account` 下方；新增 remote manager 和 SSH error 单测；`bun test`、`mise run typecheck`、`mise run lint` 均通过。
+
+- Phase 6 后续修复：新增 server `/shutdown` 端点与 `RemoteRuntimeClient.shutdownRemote()`；SSH remote handle stop 时先请求远端 server 自停，避免 disconnect 后 connect 因远端 39123 残留而失败。主页面 `switchWorkspaceRuntime()` 改为跨 runtime 切换时关闭旧 runtime thread tabs；connect 到 remote 时额外清理目标 remote 的旧 tabs，确保窗口从目标 workspace 重新加载。补充验证：`bun test apps/desktop/src/bun/remote/remote-runtime-client.test.ts apps/server/src/http-server.test.ts apps/desktop/src/bun/remote/remote-server-manager.test.ts` 通过，8 pass / 0 fail；`mise run typecheck` 通过；`bun run lint -- <changed files>` 通过。
 
 ## 上下文与方向
 
@@ -301,3 +320,8 @@ function formatSshBootstrapFailure(input: {
 [2026-07-21 20:28:00+08:00] 修改说明：根据独立审计修复 Settings 断开/删除当前 remote、RemoteStatus stale disconnect、RemoteServerManager 并发连接泄漏、SSH host key 分阶段文案和 health-check 分类遗漏。理由：审计发现均为真实 runtime lifecycle 风险，必须在汇报前修复。
 
 [2026-07-21 20:30:00+08:00] 修改说明：完成最终验证和结果汇报记录。理由：代码、测试、lint、typecheck 均已达成计划验收。
+
+
+[2026-07-21 23:05:00+08:00] 修改说明：根据用户后续反馈进入 Phase 6。修复 disconnect 后 connect 因远端 server 未显式关闭导致的 39123 端口占用；调整 runtime 切换语义为关闭旧 workspace thread tabs 并重新从当前 runtime 加载配置/文件树/模型。理由：remote server 生命周期和 workspace UI 生命周期必须有清晰边界，不能依赖隐式 SSH session 清理或保留跨 runtime 的旧 tab。
+
+[2026-07-21 23:15:00+08:00] 修改说明：用户确认提交 Git，Phase 7 标记完成并准备创建原子提交。理由：本轮 Phase 6 修复已通过测试、typecheck 和 lint 验证。

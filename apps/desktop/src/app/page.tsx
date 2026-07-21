@@ -274,8 +274,11 @@ function PageInner() {
   const switchWorkspaceRuntime = useCallback(
     (nextRuntimeId: RuntimeId) => {
       const current = workspaceRuntimeIdRef.current;
-      if (current !== nextRuntimeId && current.startsWith("remote:")) {
+      if (current !== nextRuntimeId) {
         closeRuntime(current);
+      }
+      if (current !== nextRuntimeId && nextRuntimeId.startsWith("remote:")) {
+        closeRuntime(nextRuntimeId);
       }
       workspaceRuntimeIdRef.current = nextRuntimeId;
       setWorkspaceRuntimeId(nextRuntimeId);
@@ -388,12 +391,14 @@ function PageInner() {
     // Share a specific thread, or the active thread when no path is given (the
     // header button / native menu / palette). The active tab id is `thread:{path}`.
     shareThread: ({ path, runtimeId }) => {
-      if (runtimeId && runtimeId !== workspaceRuntimeId) return;
+      const targetRuntimeId = runtimeId ?? workspaceRuntimeId;
+      if (targetRuntimeId !== workspaceRuntimeId) return;
       const activeId = activeTabIdRef.current;
+      const activeTab = tabs.tabs.find((tab) => tab.id === activeId);
       const target =
         path ??
-        (activeId?.startsWith("thread:")
-          ? activeId.slice("thread:".length)
+        (activeTab?.type === "thread" && activeTab.runtimeId === targetRuntimeId
+          ? activeTab.path
           : undefined);
       if (!target) return;
       shareTargetRef.current = target;

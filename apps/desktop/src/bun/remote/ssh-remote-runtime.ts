@@ -49,6 +49,7 @@ export async function startSshRemoteRuntime(
     return {
       client,
       stop: async () => {
+        await client.shutdownRemote().catch(() => undefined);
         client.shutdown();
         await Promise.all(processes.map((process) => process.stop()));
       },

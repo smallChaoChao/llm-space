@@ -64,6 +64,29 @@ describe("RemoteRuntimeClient", () => {
     expect(body).toMatchObject({ method: "models.available" });
   });
 
+  test("requests remote shutdown with bearer auth", async () => {
+    const requests: Request[] = [];
+    await _withFetch(
+      (request) => {
+        requests.push(request);
+        return Response.json({ ok: true });
+      },
+      async () => {
+        const client = new RemoteRuntimeClient({
+          id: "remote:test",
+          name: "Test Remote",
+          baseUrl: "http://remote.test/",
+          token: "secret",
+        });
+        await client.shutdownRemote();
+      }
+    );
+
+    expect(requests[0].method).toBe("POST");
+    expect(requests[0].url).toBe("http://remote.test/shutdown");
+    expect(requests[0].headers.get("authorization")).toBe("Bearer secret");
+  });
+
   test("throws on runtime RPC errors", async () => {
     await _withFetch(
       () =>
