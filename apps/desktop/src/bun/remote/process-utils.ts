@@ -33,22 +33,6 @@ export function spawnManagedProcess(
   };
 }
 
-export async function waitForProcess(
-  child: ChildProcess,
-  timeoutMs = 5_000
-): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-}
-
 export async function stopProcess(
   child: ChildProcess,
   timeoutMs = 2_000

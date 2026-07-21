@@ -35,12 +35,6 @@ export function buildTunnelArgs(input: {
   ];
 }
 
-export function buildRemoteCleanupArgs(
-  config: SshRemoteRuntimeConfig
-): string[] {
-  return [...buildSshBaseArgs(config), buildRemoteCleanupCommand(config)];
-}
-
 export function buildRemoteServerArgs(input: {
   config: SshRemoteRuntimeConfig;
   token: string;
@@ -82,11 +76,4 @@ export function buildRemoteServerCommand(input: {
 
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-export function buildRemoteCleanupCommand(
-  config: Pick<SshRemoteRuntimeConfig, "remoteServerPort">
-): string {
-  const pattern = `(@llm-space/server|apps/server|src/index[.]ts).*--port ${config.remoteServerPort}`;
-  return `pkill -f ${shellQuote(pattern)} >/dev/null 2>&1 || true`;
 }
