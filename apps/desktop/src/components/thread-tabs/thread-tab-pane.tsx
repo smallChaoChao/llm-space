@@ -195,6 +195,7 @@ export function ThreadTabPane({
         initialValue={thread}
         active={active}
         transport={rpcTransport}
+        runtimeId={runtimeId}
         onChange={handleChange}
         onRenameTitle={handleRenameTitle}
       />

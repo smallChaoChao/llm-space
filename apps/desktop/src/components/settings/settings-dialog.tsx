@@ -1,6 +1,14 @@
 "use client";
 
+import { ModelProvider } from "@llm-space/ui/components/model-provider";
 import { Dialog, DialogContent } from "@llm-space/ui/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@llm-space/ui/ui/select";
 import {
   Tabs,
   TabsContent,
@@ -18,8 +26,12 @@ import {
   SlidersHorizontal,
   Sparkles,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
+import { getDefaultRuntime, listRuntimes } from "@/client/remote-servers";
+import { createElectrobunModelClient } from "@/host/host-services";
 import type { SettingsTab } from "@/shared/commands";
+import type { RuntimeId, RuntimeView } from "@/shared/runtime";
 
 import { AccountPage } from "./account-page";
 import { ExperimentalPage } from "./experimental-page";
@@ -36,20 +48,67 @@ const PAGES = [
     value: "general",
     label: "General",
     icon: SlidersHorizontal,
-    Page: GeneralPage,
+    Page: () => <GeneralPage />,
   },
-  { value: "account", label: "Account", icon: CircleUser, Page: AccountPage },
-  { value: "models", label: "Models", icon: Boxes, Page: ModelsPage },
-  { value: "mcp", label: "MCP", icon: Cable, Page: McpPage },
-  { value: "network", label: "Network", icon: Network, Page: NetworkPage },
-  { value: "remote", label: "Remote", icon: Server, Page: RemoteServersPage },
-  { value: "search", label: "Search", icon: Search, Page: SearchPage },
-  { value: "skills", label: "Skills", icon: Sparkles, Page: SkillsPage },
+  {
+    value: "account",
+    label: "Account",
+    icon: CircleUser,
+    Page: () => <AccountPage />,
+  },
+  {
+    value: "models",
+    label: "Models",
+    icon: Boxes,
+    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
+      <ModelProvider client={createElectrobunModelClient(runtimeId)}>
+        <ModelsPage />
+      </ModelProvider>
+    ),
+  },
+  {
+    value: "mcp",
+    label: "MCP",
+    icon: Cable,
+    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
+      <McpPage runtimeId={runtimeId} />
+    ),
+  },
+  {
+    value: "network",
+    label: "Network",
+    icon: Network,
+    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
+      <NetworkPage runtimeId={runtimeId} />
+    ),
+  },
+  {
+    value: "remote",
+    label: "Remote",
+    icon: Server,
+    Page: () => <RemoteServersPage />,
+  },
+  {
+    value: "search",
+    label: "Search",
+    icon: Search,
+    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
+      <SearchPage runtimeId={runtimeId} />
+    ),
+  },
+  {
+    value: "skills",
+    label: "Skills",
+    icon: Sparkles,
+    Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
+      <SkillsPage runtimeId={runtimeId} />
+    ),
+  },
   {
     value: "experimental",
     label: "Experimental",
     icon: FlaskConical,
-    Page: ExperimentalPage,
+    Page: () => <ExperimentalPage />,
   },
 ] as const;
 
@@ -64,6 +123,46 @@ export function SettingsDialog({
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
 }) {
+  const [runtimeId, setRuntimeId] = useState<RuntimeId>("local");
+  const [runtimes, setRuntimes] = useState<RuntimeView[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void Promise.all([listRuntimes(), getDefaultRuntime()])
+      .then(([next, defaultRuntimeId]) => {
+        if (cancelled) return;
+        setRuntimes(next);
+        setRuntimeId(
+          next.some((runtime) => runtime.id === defaultRuntimeId)
+            ? defaultRuntimeId
+            : "local"
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRuntimes([]);
+          setRuntimeId("local");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const runtimeOptions =
+    runtimes.length > 0
+      ? runtimes
+      : ([
+          {
+            id: "local",
+            kind: "local",
+            name: "Local",
+            status: "connected",
+            capabilities: [],
+          },
+        ] satisfies RuntimeView[]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -82,8 +181,26 @@ export function SettingsDialog({
           onValueChange={(value) => onTabChange(value as SettingsTab)}
         >
           <aside className="bg-muted/30 flex w-50 shrink-0 flex-col gap-2 border-r p-3">
-            <header>
+            <header className="space-y-2">
               <div className="text-base font-medium">Settings</div>
+              <Select
+                value={runtimeId}
+                onValueChange={(value) => setRuntimeId(value as RuntimeId)}
+              >
+                <SelectTrigger
+                  className="h-7 w-full text-xs"
+                  aria-label="Settings runtime"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runtimeOptions.map((runtime) => (
+                    <SelectItem key={runtime.id} value={runtime.id}>
+                      {runtime.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </header>
             <TabsList className="h-fit w-full flex-col gap-0.5 bg-transparent p-0">
               {PAGES.map(({ value, label, icon: Icon }) => (
@@ -97,7 +214,7 @@ export function SettingsDialog({
           <div className="min-w-0 grow">
             {PAGES.map(({ value, Page }) => (
               <TabsContent key={value} value={value} className="size-full">
-                <Page />
+                <Page runtimeId={runtimeId} />
               </TabsContent>
             ))}
           </div>

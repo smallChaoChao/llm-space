@@ -1,6 +1,7 @@
 import type { SkillContent, SkillInfo, SkillsSettings } from "@llm-space/core";
 
 import { electrobun } from "@/lib/electrobun";
+import type { RuntimeId } from "@/shared/runtime";
 
 function _rpc() {
   if (!electrobun.rpc) {
@@ -9,8 +10,10 @@ function _rpc() {
   return electrobun.rpc;
 }
 
-export async function getSkillsSettings(): Promise<SkillsSettings> {
-  return _rpc().request.skillsGetSettings({});
+export async function getSkillsSettings(
+  runtimeId?: RuntimeId
+): Promise<SkillsSettings> {
+  return _rpc().request.skillsGetSettings({ ..._scope(runtimeId) });
 }
 
 /** Open the native folder picker; resolves to the chosen path or `null`. */
@@ -19,33 +22,60 @@ export async function browseForSkillsPath(): Promise<string | null> {
   return path;
 }
 
-export async function addSkillsPath(path: string): Promise<SkillsSettings> {
-  return _rpc().request.skillsAddPath({ path });
+export async function addSkillsPath(
+  path: string,
+  runtimeId?: RuntimeId
+): Promise<SkillsSettings> {
+  return _rpc().request.skillsAddPath({ ..._scope(runtimeId), path });
 }
 
-export async function removeSkillsPath(path: string): Promise<SkillsSettings> {
-  return _rpc().request.skillsRemovePath({ path });
+export async function removeSkillsPath(
+  path: string,
+  runtimeId?: RuntimeId
+): Promise<SkillsSettings> {
+  return _rpc().request.skillsRemovePath({ ..._scope(runtimeId), path });
 }
 
 export async function setSkillHidden(
   path: string,
   skillName: string,
-  hidden: boolean
+  hidden: boolean,
+  runtimeId?: RuntimeId
 ): Promise<SkillsSettings> {
-  return _rpc().request.skillsSetSkillHidden({ path, skillName, hidden });
+  return _rpc().request.skillsSetSkillHidden({
+    ..._scope(runtimeId),
+    path,
+    skillName,
+    hidden,
+  });
 }
 
 export async function setAllSkillsHidden(
   path: string,
-  hidden: boolean
+  hidden: boolean,
+  runtimeId?: RuntimeId
 ): Promise<SkillsSettings> {
-  return _rpc().request.skillsSetAllSkillsHidden({ path, hidden });
+  return _rpc().request.skillsSetAllSkillsHidden({
+    ..._scope(runtimeId),
+    path,
+    hidden,
+  });
 }
 
-export async function listSkills(path: string): Promise<SkillInfo[]> {
-  return _rpc().request.skillsListSkills({ path });
+export async function listSkills(
+  path: string,
+  runtimeId?: RuntimeId
+): Promise<SkillInfo[]> {
+  return _rpc().request.skillsListSkills({ ..._scope(runtimeId), path });
 }
 
-export async function readSkill(path: string): Promise<SkillContent> {
-  return _rpc().request.skillsReadSkill({ path });
+export async function readSkill(
+  path: string,
+  runtimeId?: RuntimeId
+): Promise<SkillContent> {
+  return _rpc().request.skillsReadSkill({ ..._scope(runtimeId), path });
+}
+
+function _scope(runtimeId: RuntimeId | undefined) {
+  return runtimeId ? { runtimeId } : {};
 }

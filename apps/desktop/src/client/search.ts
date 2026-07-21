@@ -1,6 +1,7 @@
 import type { SearchSettings } from "@llm-space/core";
 
 import { electrobun } from "@/lib/electrobun";
+import type { RuntimeId } from "@/shared/runtime";
 
 function _rpc() {
   if (!electrobun.rpc) {
@@ -9,12 +10,19 @@ function _rpc() {
   return electrobun.rpc;
 }
 
-export async function getSearchSettings(): Promise<SearchSettings> {
-  return _rpc().request.getSearchSettings({});
+export async function getSearchSettings(
+  runtimeId?: RuntimeId
+): Promise<SearchSettings> {
+  return _rpc().request.getSearchSettings({ ..._scope(runtimeId) });
 }
 
 export async function setSearchSettings(
-  settings: SearchSettings
+  settings: SearchSettings,
+  runtimeId?: RuntimeId
 ): Promise<SearchSettings> {
-  return _rpc().request.setSearchSettings({ settings });
+  return _rpc().request.setSearchSettings({ ..._scope(runtimeId), settings });
+}
+
+function _scope(runtimeId: RuntimeId | undefined) {
+  return runtimeId ? { runtimeId } : {};
 }

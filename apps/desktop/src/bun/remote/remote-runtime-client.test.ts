@@ -91,6 +91,55 @@ describe("RemoteRuntimeClient", () => {
     );
   });
 
+  test("posts filesystem, tool, MCP, and settings methods", async () => {
+    const methods: string[] = [];
+    await _withFetch(
+      async (request) => {
+        const body = (await request.json()) as { method: string };
+        methods.push(body.method);
+        return Response.json({
+          id: "1",
+          ok: true,
+          result: body.method === "fs.realpath" ? { path: "/tmp/x" } : [],
+        });
+      },
+      async () => {
+        const client = new RemoteRuntimeClient({
+          id: "remote:test",
+          name: "Test Remote",
+          baseUrl: "http://remote.test",
+          token: "secret",
+        });
+        await client.fsCp("a", "b");
+        await client.fsMv("b", "c");
+        await client.fsRm("c");
+        await client.builtInCallTool({ name: "ls", arguments: {} });
+        await client.mcpListTools("server-1");
+        await client.mcpCallTool({
+          serverId: "server-1",
+          toolName: "tool",
+          arguments: {},
+        });
+        await client.setSearchSettings({
+          provider: "firecrawl",
+          braveApiKey: "",
+          firecrawlApiKey: "key",
+          tavilyApiKey: "",
+        });
+      }
+    );
+
+    expect(methods).toEqual([
+      "fs.cp",
+      "fs.mv",
+      "fs.rm",
+      "builtinTools.call",
+      "mcp.listTools",
+      "mcp.callTool",
+      "search.set",
+    ]);
+  });
+
   test("parses SSE stream events", async () => {
     const events: AgentEvent[] = [];
     await _withFetch(

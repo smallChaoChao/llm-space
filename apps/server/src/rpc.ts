@@ -55,6 +55,21 @@ async function _dispatch(
     case "fs.mkdir":
       await runtime.fsMkdir(_stringParam(params, "path"));
       return null;
+    case "fs.cp":
+      await runtime.fsCp(
+        _stringParam(params, "src"),
+        _stringParam(params, "dest")
+      );
+      return null;
+    case "fs.mv":
+      await runtime.fsMv(
+        _stringParam(params, "src"),
+        _stringParam(params, "dest")
+      );
+      return null;
+    case "fs.rm":
+      await runtime.fsRm(_stringParam(params, "path"));
+      return null;
     case "fs.read":
       return runtime.fsRead(_stringParam(params, "path"));
     case "fs.write":
@@ -64,8 +79,28 @@ async function _dispatch(
       return { path: await runtime.fsRealpath(_stringParam(params, "path")) };
     case "models.available":
       return runtime.availableModels();
+    case "models.removeProvider":
+      return runtime.removeProvider(_stringParam(params, "providerId"));
     case "models.builtinProviders":
       return runtime.builtinProviders();
+    case "models.addProvider":
+      return runtime.addProvider(_stringParam(params, "providerId"));
+    case "models.addCustomProvider":
+      return runtime.addCustomProvider(
+        params as Parameters<RuntimeClient["addCustomProvider"]>[0]
+      );
+    case "models.updateProvider":
+      return runtime.updateProvider(
+        params as Parameters<RuntimeClient["updateProvider"]>[0]
+      );
+    case "models.setModelEnabled":
+      return runtime.setModelEnabled(
+        params as Parameters<RuntimeClient["setModelEnabled"]>[0]
+      );
+    case "models.setAllModelsEnabled":
+      return runtime.setAllModelsEnabled(
+        params as Parameters<RuntimeClient["setAllModelsEnabled"]>[0]
+      );
     case "models.getDefault":
       return runtime.getDefaultModel();
     case "models.resolveGeneratorEnv":
@@ -73,16 +108,95 @@ async function _dispatch(
         providerId: _stringParam(params, "providerId"),
         envNames: _stringArrayParam(params, "envNames"),
       });
+    case "models.setDefault":
+      return runtime.setDefaultModel(
+        (params as { model?: unknown }).model as Parameters<
+          RuntimeClient["setDefaultModel"]
+        >[0]
+      );
+    case "models.testConnection":
+      await runtime.testModelConnection(
+        params as Parameters<RuntimeClient["testModelConnection"]>[0]
+      );
+      return null;
+    case "models.removeCustomModel":
+      return runtime.removeCustomModel(
+        params as Parameters<RuntimeClient["removeCustomModel"]>[0]
+      );
+    case "models.upsertCustomModel":
+      return runtime.upsertCustomModel(
+        params as Parameters<RuntimeClient["upsertCustomModel"]>[0]
+      );
     case "mcp.listServers":
       return runtime.mcpListServers();
+    case "mcp.addServer":
+      return runtime.mcpAddServer(
+        (params as { server: unknown }).server as Parameters<
+          RuntimeClient["mcpAddServer"]
+        >[0]
+      );
+    case "mcp.updateServer":
+      return runtime.mcpUpdateServer(
+        _stringParam(params, "serverId"),
+        (params as { server: unknown }).server as Parameters<
+          RuntimeClient["mcpUpdateServer"]
+        >[1]
+      );
+    case "mcp.removeServer":
+      return runtime.mcpRemoveServer(_stringParam(params, "serverId"));
+    case "mcp.disconnectServer":
+      return runtime.mcpDisconnectServer(_stringParam(params, "serverId"));
+    case "mcp.listTools":
+      return runtime.mcpListTools(_stringParam(params, "serverId"));
+    case "mcp.callTool":
+      return runtime.mcpCallTool({
+        serverId: _stringParam(params, "serverId"),
+        toolName: _stringParam(params, "toolName"),
+        arguments: _recordParam(params, "arguments"),
+      });
     case "builtinTools.list":
       return runtime.builtInListTools();
+    case "builtinTools.call":
+      return runtime.builtInCallTool({
+        name: _stringParam(params, "name"),
+        arguments: _recordParam(params, "arguments"),
+      });
     case "search.get":
       return runtime.getSearchSettings();
+    case "search.set":
+      return runtime.setSearchSettings(
+        (params as { settings: unknown }).settings as Parameters<
+          RuntimeClient["setSearchSettings"]
+        >[0]
+      );
     case "network.get":
       return runtime.getNetworkSettings();
+    case "network.set":
+      return runtime.setNetworkSettings(
+        (params as { settings: unknown }).settings as Parameters<
+          RuntimeClient["setNetworkSettings"]
+        >[0]
+      );
+    case "network.detectSystemProxy":
+      return runtime.detectSystemProxy();
     case "skills.getSettings":
       return runtime.skillsGetSettings();
+    case "skills.addPath":
+      return runtime.skillsAddPath(_stringParam(params, "path"));
+    case "skills.removePath":
+      return runtime.skillsRemovePath(_stringParam(params, "path"));
+    case "skills.setSkillHidden":
+      return runtime.skillsSetSkillHidden(
+        params as Parameters<RuntimeClient["skillsSetSkillHidden"]>[0]
+      );
+    case "skills.setAllSkillsHidden":
+      return runtime.skillsSetAllSkillsHidden(
+        params as Parameters<RuntimeClient["skillsSetAllSkillsHidden"]>[0]
+      );
+    case "skills.listSkills":
+      return runtime.skillsListSkills(_stringParam(params, "path"));
+    case "skills.readSkill":
+      return runtime.skillsReadSkill(_stringParam(params, "path"));
     default:
       throw new ServerError(
         "method_not_found",
@@ -126,4 +240,18 @@ function _threadParam(params: Record<string, unknown>): Thread {
     );
   }
   return value;
+}
+
+function _recordParam(
+  params: Record<string, unknown>,
+  name: string
+): Record<string, unknown> {
+  const value = params[name];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ServerError(
+      "invalid_params",
+      `RPC param "${name}" must be an object.`
+    );
+  }
+  return value as Record<string, unknown>;
 }

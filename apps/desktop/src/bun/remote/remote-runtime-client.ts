@@ -1,13 +1,20 @@
 import type {
   AgentEvent,
   BuiltinTool,
+  CustomModel,
   FileNode,
+  McpCallToolResponse,
+  McpServerDraft,
+  McpServerToolsResponse,
   McpServerView,
   ModelConfig,
   ModelProviderGroup,
   NetworkSettings,
   SearchSettings,
+  SkillContent,
+  SkillInfo,
   SkillsSettings,
+  SystemProxyDetection,
   Thread,
 } from "@llm-space/core";
 import {
@@ -181,94 +188,130 @@ export class RemoteRuntimeClient implements RuntimeClient {
     this._activeStreams.clear();
   }
 
-  removeProvider() {
-    return Promise.reject(_notImplemented("models.removeProvider"));
+  removeProvider(providerId: string) {
+    return this._rpc<ModelProviderGroup[]>("models.removeProvider", {
+      providerId,
+    });
   }
-  addProvider() {
-    return Promise.reject(_notImplemented("models.addProvider"));
+  addProvider(providerId: string) {
+    return this._rpc<ModelProviderGroup[]>("models.addProvider", {
+      providerId,
+    });
   }
-  addCustomProvider() {
-    return Promise.reject(_notImplemented("models.addCustomProvider"));
+  addCustomProvider(input: {
+    id: string;
+    name: string;
+    baseUrl: string;
+    api?: "anthropic-messages" | "openai-completions" | "openai-responses";
+  }) {
+    return this._rpc<ModelProviderGroup[]>("models.addCustomProvider", input);
   }
-  updateProvider() {
-    return Promise.reject(_notImplemented("models.updateProvider"));
+  updateProvider(input: {
+    providerId: string;
+    apiKey?: string | null;
+    baseUrl?: string | null;
+    headers?: Record<string, string> | null;
+    name?: string | null;
+    api?:
+      "anthropic-messages" | "openai-completions" | "openai-responses" | null;
+    icon?: string | null;
+  }) {
+    return this._rpc<ModelProviderGroup[]>("models.updateProvider", input);
   }
-  setModelEnabled() {
-    return Promise.reject(_notImplemented("models.setModelEnabled"));
+  setModelEnabled(input: {
+    providerId: string;
+    modelId: string;
+    enabled: boolean;
+  }) {
+    return this._rpc<ModelProviderGroup[]>("models.setModelEnabled", input);
   }
-  setAllModelsEnabled() {
-    return Promise.reject(_notImplemented("models.setAllModelsEnabled"));
+  setAllModelsEnabled(input: { providerId: string; enabled: boolean }) {
+    return this._rpc<ModelProviderGroup[]>("models.setAllModelsEnabled", input);
   }
-  setDefaultModel() {
-    return Promise.reject(_notImplemented("models.setDefaultModel"));
+  setDefaultModel(model: ModelConfig | null) {
+    return this._rpc<ModelConfig | null>("models.setDefault", { model });
   }
-  testModelConnection() {
-    return Promise.reject(_notImplemented("models.testConnection"));
+  async testModelConnection(input: {
+    providerId: string;
+    modelId: string;
+    candidate?: CustomModel;
+  }) {
+    await this._rpc<null>("models.testConnection", input);
   }
-  removeCustomModel() {
-    return Promise.reject(_notImplemented("models.removeCustomModel"));
+  removeCustomModel(input: { providerId: string; modelId: string }) {
+    return this._rpc<ModelProviderGroup[]>("models.removeCustomModel", input);
   }
-  upsertCustomModel() {
-    return Promise.reject(_notImplemented("models.upsertCustomModel"));
+  upsertCustomModel(input: {
+    providerId: string;
+    model: CustomModel;
+    originalId?: string;
+  }) {
+    return this._rpc<ModelProviderGroup[]>("models.upsertCustomModel", input);
   }
-  fsCp() {
-    return Promise.reject(_notImplemented("fs.cp"));
+  async fsCp(src: string, dest: string) {
+    await this._rpc<null>("fs.cp", { src, dest });
   }
-  fsMv() {
-    return Promise.reject(_notImplemented("fs.mv"));
+  async fsMv(src: string, dest: string) {
+    await this._rpc<null>("fs.mv", { src, dest });
   }
-  fsRm() {
-    return Promise.reject(_notImplemented("fs.rm"));
+  async fsRm(path: string) {
+    await this._rpc<null>("fs.rm", { path });
   }
-  mcpAddServer() {
-    return Promise.reject(_notImplemented("mcp.addServer"));
+  mcpAddServer(server: McpServerDraft) {
+    return this._rpc<McpServerView[]>("mcp.addServer", { server });
   }
-  mcpUpdateServer() {
-    return Promise.reject(_notImplemented("mcp.updateServer"));
+  mcpUpdateServer(serverId: string, server: McpServerDraft) {
+    return this._rpc<McpServerView[]>("mcp.updateServer", { serverId, server });
   }
-  mcpRemoveServer() {
-    return Promise.reject(_notImplemented("mcp.removeServer"));
+  mcpRemoveServer(serverId: string) {
+    return this._rpc<McpServerView[]>("mcp.removeServer", { serverId });
   }
-  mcpDisconnectServer() {
-    return Promise.reject(_notImplemented("mcp.disconnectServer"));
+  mcpDisconnectServer(serverId: string) {
+    return this._rpc<McpServerView[]>("mcp.disconnectServer", { serverId });
   }
-  mcpListTools() {
-    return Promise.reject(_notImplemented("mcp.listTools"));
+  mcpListTools(serverId: string) {
+    return this._rpc<McpServerToolsResponse>("mcp.listTools", { serverId });
   }
-  mcpCallTool() {
-    return Promise.reject(_notImplemented("mcp.callTool"));
+  mcpCallTool(input: {
+    serverId: string;
+    toolName: string;
+    arguments: Record<string, unknown>;
+  }) {
+    return this._rpc<McpCallToolResponse>("mcp.callTool", input);
   }
-  builtInCallTool() {
-    return Promise.reject(_notImplemented("builtinTools.call"));
+  builtInCallTool(input: { name: string; arguments: Record<string, unknown> }) {
+    return this._rpc<{ contentText: string }>("builtinTools.call", input);
   }
-  setSearchSettings(settings: SearchSettings): SearchSettings {
-    void settings;
-    throw _notImplemented("search.set");
+  setSearchSettings(settings: SearchSettings) {
+    return this._rpc<SearchSettings>("search.set", { settings });
   }
-  setNetworkSettings(settings: NetworkSettings): NetworkSettings {
-    void settings;
-    throw _notImplemented("network.set");
+  setNetworkSettings(settings: NetworkSettings) {
+    return this._rpc<NetworkSettings>("network.set", { settings });
   }
-  detectSystemProxy(): never {
-    throw _notImplemented("network.detectSystemProxy");
+  detectSystemProxy() {
+    return this._rpc<SystemProxyDetection>("network.detectSystemProxy");
   }
-  skillsAddPath(): never {
-    throw _notImplemented("skills.addPath");
+  skillsAddPath(path: string) {
+    return this._rpc<SkillsSettings>("skills.addPath", { path });
   }
-  skillsRemovePath(): never {
-    throw _notImplemented("skills.removePath");
+  skillsRemovePath(path: string) {
+    return this._rpc<SkillsSettings>("skills.removePath", { path });
   }
-  skillsSetSkillHidden(): never {
-    throw _notImplemented("skills.setSkillHidden");
+  skillsSetSkillHidden(input: {
+    path: string;
+    skillName: string;
+    hidden: boolean;
+  }) {
+    return this._rpc<SkillsSettings>("skills.setSkillHidden", input);
   }
-  skillsSetAllSkillsHidden(): never {
-    throw _notImplemented("skills.setAllSkillsHidden");
+  skillsSetAllSkillsHidden(input: { path: string; hidden: boolean }) {
+    return this._rpc<SkillsSettings>("skills.setAllSkillsHidden", input);
   }
-  skillsListSkills() {
-    return [];
+  skillsListSkills(path: string) {
+    return this._rpc<SkillInfo[]>("skills.listSkills", { path });
   }
-  skillsReadSkill(): never {
-    throw _notImplemented("skills.readSkill");
+  skillsReadSkill(path: string) {
+    return this._rpc<SkillContent>("skills.readSkill", { path });
   }
 
   private async _fetchHealth(): Promise<RemoteRuntimeHealthResponse> {
@@ -311,10 +354,6 @@ export class RemoteRuntimeClient implements RuntimeClient {
       "Content-Type": "application/json",
     };
   }
-}
-
-function _notImplemented(method: string): Error {
-  return new Error(`Remote runtime method is not implemented yet: ${method}`);
 }
 
 async function _httpError(response: Response): Promise<string> {

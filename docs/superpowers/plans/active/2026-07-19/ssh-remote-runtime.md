@@ -3155,3 +3155,467 @@ runtimeRouter.setDefaultRuntime(remoteRuntimeId);
 - `bun run test`：100 pass，0 fail，0 skipped。
 
 [2026-07-20 21:30:00+08:00] 修改说明：完成用户验收反馈中的 Remote Servers 页面和 SSH 重连修复。理由：修复 Edit/Update 不更新、Disconnect 后端口占用、Set default 语义不清、表单复杂、页面风格不一致等问题。
+
+---
+
+## Milestone 7 细化方案：补齐远端能力
+
+本节细化 Milestone 7 的剩余开发内容。Milestone 7 的目标是让 remote runtime 从“能连接、能读写 thread 文件”的原型，升级为更接近 local runtime 的完整能力。它分为 7A 文件系统、7B built-in tools、7C MCP/settings 三组。实现顺序必须先协议层，再 server dispatch，再 Desktop RemoteRuntimeClient，再 UI runtimeId 透传。
+
+### 7A：Remote filesystem 完整操作
+
+目标：补齐 remote 文件系统写操作，使 remote workspace 的基本文件管理体验与 local 对齐。
+
+需要支持的方法：
+
+```text
+fs.cp
+fs.mv
+fs.rm
+```
+
+影响的用户行为：
+
+```text
+修改 thread 标题（需要 fs.mv）
+文件树 rename
+文件树 duplicate
+文件树 delete
+文件树 move
+```
+
+修改文件：
+
+```text
+packages/runtime/src/remote-protocol.ts
+apps/server/src/rpc.ts
+apps/desktop/src/bun/remote/remote-runtime-client.ts
+apps/desktop/src/bun/remote/remote-runtime-client.test.ts
+```
+
+验收：remote runtime 下修改 thread title 不再出现 `Remote runtime method is not implemented yet: fs.mv`；remote 文件树 duplicate/delete/rename/move 操作写入远端 workspace。
+
+### 7B：Remote built-in tools 执行
+
+目标：让 remote thread 的 built-in tool call 在远端 server 上执行，而不是在 macOS 本地执行或报未实现。
+
+需要支持的方法：
+
+```text
+builtinTools.call
+```
+
+影响的工具：
+
+```text
+read
+write
+edit
+ls
+tree
+grep
+glob
+bash
+skill
+web_search
+web_fetch
+weather_report
+present_files
+todo_write
+sleep
+ask_user_question
+```
+
+协议层和 server 层实现后，`RemoteRuntimeClient.builtInCallTool()` 应 POST：
+
+```json
+{
+  "method": "builtinTools.call",
+  "params": {
+    "name": "...",
+    "arguments": {}
+  }
+}
+```
+
+验收：remote runtime 下调用 built-in `bash` 执行 `uname -a` 返回 Linux 信息；调用 `read/grep/glob` 操作 Linux remote workspace。
+
+### 7C：Remote MCP / models / search / network / skills settings
+
+目标：把 remote runtime 的配置和 MCP 能力补齐，避免 Settings/MCP 操作只能写 local 或报未实现。
+
+需要支持的 MCP 方法：
+
+```text
+mcp.addServer
+mcp.updateServer
+mcp.removeServer
+mcp.disconnectServer
+mcp.listTools
+mcp.callTool
+```
+
+需要支持的 model 方法：
+
+```text
+models.removeProvider
+models.addProvider
+models.addCustomProvider
+models.updateProvider
+models.setModelEnabled
+models.setAllModelsEnabled
+models.setDefault
+models.testConnection
+models.removeCustomModel
+models.upsertCustomModel
+```
+
+需要支持的 settings 方法：
+
+```text
+search.set
+network.set
+network.detectSystemProxy
+skills.addPath
+skills.removePath
+skills.setSkillHidden
+skills.setAllSkillsHidden
+skills.listSkills
+skills.readSkill
+```
+
+验收：remote runtime 下 Models/Search/Network/Skills/MCP 操作写入远端 `~/.llm-space-server/settings` 或用户配置的 remote home，而不是 macOS `~/.llm-space/settings`。
+
+### UI runtimeId 透传后续收口
+
+协议层补齐后仍需继续检查 UI 透传。当前部分 UI client 仍依赖 default runtime：
+
+```text
+apps/desktop/src/client/mcp.ts
+apps/desktop/src/client/built-in-tools.ts
+apps/desktop/src/client/tool-execution.ts
+apps/desktop/src/client/search.ts
+apps/desktop/src/client/network.ts
+apps/desktop/src/client/skills.ts
+packages/ui/src/host/types.ts
+packages/ui/src/components/thread-playground/message/use-tool-call-runner.ts
+packages/ui/src/components/thread-playground/stores/thread-store.ts
+```
+
+风险：同时打开 local tab 和 remote tab 时，如果 tool execution 没有显式 `runtimeId`，工具可能在 default runtime 上执行，而不是当前 tab runtime。
+
+后续更严格的目标：
+
+```ts
+executeTool(tool, args, { runtimeId });
+```
+
+由 `ThreadTabPane` / `ThreadPlayground` 把当前 thread 的 runtimeId 传入 tool execution。Settings 页也应显示或选择当前配置作用的 runtime。
+
+### 本轮已实现记录
+
+已完成协议层、server dispatch 和 Desktop RemoteRuntimeClient 的主要方法补齐：
+
+```text
+packages/runtime/src/remote-protocol.ts
+apps/server/src/rpc.ts
+apps/desktop/src/bun/remote/remote-runtime-client.ts
+apps/desktop/src/bun/remote/remote-runtime-client.test.ts
+```
+
+验证结果：
+
+```text
+bun run typecheck 通过
+bun run lint 通过
+bun run test 通过：101 pass / 0 fail / 0 skipped
+```
+
+尚未完成：UI 层显式 runtimeId 透传，特别是 tool execution 与 Settings 页面 runtime selector。该项应作为 Milestone 7 后续收口继续推进。
+
+[2026-07-21 00:00:00+08:00] 修改说明：细化 Milestone 7 的 7A/7B/7C 开发内容，并记录已完成的远程协议层补齐工作。理由：用户要求继续细化步骤 7 的待开发内容，同时当前已有部分协议层实现需要写回 ExecPlan 便于恢复和接力。
+
+---
+
+## Milestone 7 剩余内容细化方案：显式 runtimeId 透传与 Settings runtime 化
+
+本节细化 Milestone 7 剩余工作。当前 7A/7B/7C 的底层协议、server dispatch、RemoteRuntimeClient 方法已经基本补齐；剩余关键风险在 UI 层：很多操作仍依赖 RuntimeRouter 的 default runtime，而不是当前 tab / 当前 settings 页显式传入 runtimeId。这个问题在只连接一个 remote 且设为 default 时不明显，但在 local 和 remote 同时打开时会造成工具调用或设置写入错误 runtime。
+
+### 剩余目标
+
+完成后，以下操作都必须明确知道 runtimeId：
+
+```text
+manual tool call
+auto-run tool call
+ReAct loop tool call
+built-in tool call
+MCP tool call
+MCP import/list tools
+Models page settings
+Search page settings
+Network page settings
+Skills page settings
+```
+
+不再依赖“当前 default runtime”猜测，除非用户明确在 Settings 页选择“Default runtime”。
+
+### 第一部分：executeTool(tool, args, { runtimeId })
+
+#### 需要修改的接口
+
+`packages/ui/src/host/types.ts`：
+
+```ts
+export interface ExecuteToolOptions {
+  runtimeId?: string;
+}
+
+export type ExecuteTool = (
+  tool: McpTool | BuiltinTool,
+  args: Record<string, unknown>,
+  options?: ExecuteToolOptions
+) => Promise<ToolCallResult>;
+```
+
+这里 runtimeId 用 string 或 `RuntimeId`。由于 `packages/ui` 不应 import desktop shared runtime 类型，建议在 UI 层用 string；desktop 侧再收窄为 RuntimeId。
+
+#### ThreadPlayground 传入 runtimeId
+
+`packages/ui/src/components/thread-playground/thread-playground.tsx`：
+
+新增 prop：
+
+```ts
+runtimeId?: string;
+```
+
+在 `_ThreadPlayground` 中创建包装：
+
+```ts
+const executeToolForRuntime = executeTool
+  ? (tool, args) => executeTool(tool, args, { runtimeId })
+  : undefined;
+```
+
+传给 `createThreadStore`：
+
+```ts
+executeTool: executeToolForRuntime;
+```
+
+并通过 context/store 让 manual tool runner 能拿到 runtimeId。
+
+#### Auto-run tools
+
+`packages/ui/src/components/thread-playground/stores/thread-store.ts`：
+
+当前 store 的 `executeTool` 只接收 `(tool, args)`。如果 `ThreadPlayground` 已经包装了 runtimeId，则 store 可以保持不变。为了降低改动面，优先采用包装方案，不把 runtimeId 引入 store 类型。
+
+#### Manual tool calls
+
+`packages/ui/src/components/thread-playground/message/use-tool-call-runner.ts`：
+
+manual runner 目前直接：
+
+```ts
+executeTool(tool, args);
+```
+
+如果 HostServices.executeTool 是全局函数，它不知道当前 tab runtime。解决方式有两种：
+
+1. 在 `ThreadPlayground` 内提供 runtime-scoped HostServices override。成本高。
+2. 在 ThreadStore 中保存 `runtimeId`，manual runner 从 store 读 runtimeId 后调用 `executeTool(tool, args, { runtimeId })`。
+
+推荐方案 2：
+
+- `createThreadStore(initialThread, options)` 新增 `runtimeId?: string`。
+- store state 可新增 `runtimeId` 或在 options 闭包中保存。
+- `useToolCallRunner` 从 store 读取 `runtimeId`。
+- 调用：
+  ```ts
+  executeTool(tool, args, { runtimeId });
+  ```
+
+#### Desktop tool execution client
+
+`apps/desktop/src/client/tool-execution.ts`：
+
+```ts
+export async function executeTool(
+  tool,
+  args,
+  options?: { runtimeId?: RuntimeId }
+);
+```
+
+MCP：
+
+```ts
+callMcpTool({ runtimeId, serverId, toolName, arguments });
+```
+
+Built-in：
+
+```ts
+callBuiltInTool({ runtimeId, name, arguments });
+```
+
+`apps/desktop/src/client/mcp.ts` 与 `built-in-tools.ts` 也要接受可选 runtimeId。
+
+### 第二部分：Settings 页面 runtime 化
+
+当前 Settings 页包括：
+
+```text
+Models
+MCP
+Search
+Network
+Skills
+```
+
+它们大多调用 renderer client，未显式传 runtimeId。短期方案：给 Settings dialog 加一个 runtime selector，所有 runtime-aware page 共享该选择。
+
+#### SettingsDialog 增加 runtime selector
+
+`apps/desktop/src/components/settings/settings-dialog.tsx`：
+
+- 读取 `listRuntimes()`。
+- 保存 `settingsRuntimeId` state。
+- 默认读取 `getDefaultRuntime()`。
+- 在右侧 header 或左侧顶部显示：
+  ```text
+  Runtime: Local / devbox
+  ```
+- 把 `runtimeId` prop 传给各 settings page。
+
+#### Page props
+
+这些页面新增 prop：
+
+```ts
+interface RuntimeSettingsPageProps {
+  runtimeId?: RuntimeId;
+}
+```
+
+修改：
+
+```text
+models-page.tsx
+mcp-page.tsx
+search-page.tsx
+network-page.tsx
+skills-page.tsx
+```
+
+#### Client runtimeId 参数化
+
+修改：
+
+```text
+apps/desktop/src/client/mcp.ts
+apps/desktop/src/client/search.ts
+apps/desktop/src/client/network.ts
+apps/desktop/src/client/skills.ts
+apps/desktop/src/host/host-services.tsx
+```
+
+例如：
+
+```ts
+getSearchSettings(runtimeId?: RuntimeId)
+setSearchSettings(settings, runtimeId?: RuntimeId)
+```
+
+MCP：
+
+```ts
+listMcpServers(runtimeId?: RuntimeId)
+addMcpServer(server, runtimeId?: RuntimeId)
+listMcpTools(serverId, runtimeId?: RuntimeId)
+callMcpTool(input, runtimeId?: RuntimeId)
+```
+
+Models 需要改 `ModelClient` 接口或在 ModelProvider 层支持 runtime。这里影响较大，因为 `@llm-space/ui/components/model-provider` 当前是全局 model context。建议 Milestone 7 先处理 MCP/Search/Network/Skills，Models page runtime 化作为下一小步或保持 default runtime，并在 UI 明示“models use selected/default runtime”。如果要一次性完成，需要改 `ModelClient` 所有方法都接受 runtimeId，影响较大。
+
+### 第三部分：HostServices mcp/builtin list runtime 化
+
+Tool import dialogs 使用：
+
+```text
+HostServices.mcp.listServers
+HostServices.mcp.listTools
+HostServices.builtinTools.list
+```
+
+这些也需要 runtimeId，否则 remote tab 添加工具时可能列出 local MCP/tools。
+
+可选方案：
+
+- `ThreadPlayground` 给 `ToolListView` / import popover 传 runtimeId。
+- 或 HostServices 方法签名加 options：
+  ```ts
+  listServers(options?: { runtimeId?: string })
+  listTools(serverId, options?: { runtimeId?: string })
+  builtinTools.list(options?: { runtimeId?: string })
+  ```
+
+推荐后一种，和 `executeTool` 一致。
+
+### 第四部分：手动验收清单
+
+#### Tool execution
+
+- Local tab 中执行 `bash pwd`，确认在 macOS 本地执行。
+- Remote tab 中执行 `bash pwd`，确认在 Linux server 执行。
+- Local 和 remote 同时打开时，切 tab 后 manual tool call 不串 runtime。
+- Auto-run tools 在 remote tab 中执行时也跑 Linux。
+
+#### MCP
+
+- Settings runtime 选择 remote。
+- 添加 stdio MCP。
+- Linux 上看到 MCP 进程或 tool 能访问 Linux 路径。
+- Local runtime 的 MCP 配置不被修改。
+
+#### Search/Network/Skills
+
+- Settings runtime 选择 remote。
+- 修改 Search provider/key，确认写入 remote home 的 `settings/search.json`。
+- 修改 Network settings，确认写入 remote home 的 `settings/network.json`。
+- 修改 Skills paths，确认写入 remote home 的 `settings/skills.json`。
+- macOS `~/.llm-space/settings` 不被误写。
+
+### 自动验证
+
+必须运行：
+
+```sh
+bun run typecheck
+bun run lint
+bun run test
+git diff --check
+```
+
+新增/更新单测：
+
+```text
+apps/desktop/src/client/tool-execution.test.ts
+apps/desktop/src/bun/remote/remote-runtime-client.test.ts
+```
+
+重点断言：
+
+- `executeTool(..., { runtimeId })` 会把 runtimeId 传给 `builtInCallTool` / `mcpCallTool`。
+- Settings clients 接收 runtimeId 后，RPC payload 包含 runtimeId。
+
+### 不在本节完成的内容
+
+- server package 自动上传/安装。
+- Keychain/password/passphrase。
+- Trace remote 化。
+- Share remote thread 的完整产品化。
+
+[2026-07-21 00:20:00+08:00] 修改说明：补充 Milestone 7 剩余 UI runtimeId 透传和 Settings runtime 化方案。理由：用户要求把步骤 7 剩余内容全部细化并在 review 后继续开发，避免协议层完成但 UI 仍依赖 default runtime 的风险。
