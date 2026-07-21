@@ -50,6 +50,23 @@ const PAGES = [
     Page: () => <AccountPage />,
   },
   {
+    value: "remote",
+    label: "Remote",
+    icon: Server,
+    Page: ({
+      onConnected,
+      onDisconnected,
+    }: {
+      onConnected?: (runtimeId: RuntimeId) => void;
+      onDisconnected?: (runtimeId: RuntimeId) => void;
+    }) => (
+      <RemoteServersPage
+        onConnected={onConnected}
+        onDisconnected={onDisconnected}
+      />
+    ),
+  },
+  {
     value: "models",
     label: "Models",
     icon: Boxes,
@@ -74,12 +91,6 @@ const PAGES = [
     Page: ({ runtimeId }: { runtimeId: RuntimeId }) => (
       <NetworkPage runtimeId={runtimeId} />
     ),
-  },
-  {
-    value: "remote",
-    label: "Remote",
-    icon: Server,
-    Page: () => <RemoteServersPage />,
   },
   {
     value: "search",
@@ -110,11 +121,15 @@ export function SettingsDialog({
   onOpenChange,
   tab,
   onTabChange,
+  onRemoteConnected,
+  onRemoteDisconnected,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
+  onRemoteConnected?: (runtimeId: RuntimeId) => void;
+  onRemoteDisconnected?: (runtimeId: RuntimeId) => void;
 }) {
   const [runtimeId, setRuntimeId] = useState<RuntimeId>("local");
 
@@ -166,7 +181,11 @@ export function SettingsDialog({
           <div className="min-w-0 grow">
             {PAGES.map(({ value, Page }) => (
               <TabsContent key={value} value={value} className="size-full">
-                <Page runtimeId={runtimeId} />
+                <Page
+                  runtimeId={runtimeId}
+                  onConnected={onRemoteConnected}
+                  onDisconnected={onRemoteDisconnected}
+                />
               </TabsContent>
             ))}
           </div>

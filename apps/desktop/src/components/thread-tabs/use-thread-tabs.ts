@@ -72,6 +72,8 @@ export interface ThreadTabs {
   closeOthers: (keep: string) => void;
   /** Close every open tab and push the group onto the reopen stack. */
   closeAll: () => void;
+  /** Close every open thread tab attached to a runtime. */
+  closeRuntime: (runtimeId: RuntimeId) => void;
   /** Move the tab at `from` to `to` within the visual tab order. */
   reorder: (from: number, to: number) => void;
   /** Focus an already-open tab by id. */
@@ -431,6 +433,28 @@ export function useThreadTabs(): ThreadTabs {
     setActiveId(null);
   }, [pushClosed]);
 
+  const closeRuntime = useCallback(
+    (runtimeId: RuntimeId) => {
+      setTabs((prev) => {
+        const closed = prev.filter(
+          (tab) => tab.type === "thread" && tab.runtimeId === runtimeId
+        );
+        if (closed.length === 0) return prev;
+        const next = prev.filter(
+          (tab) => tab.type !== "thread" || tab.runtimeId !== runtimeId
+        );
+        pushClosed(closed);
+        setActiveId((current) =>
+          current !== null && closed.some((tab) => tab.id === current)
+            ? (next[next.length - 1]?.id ?? null)
+            : current
+        );
+        return next;
+      });
+    },
+    [pushClosed]
+  );
+
   const reopenClosed = useCallback(async () => {
     const group = closedStack.current.pop();
     if (!group) return;
@@ -587,6 +611,7 @@ export function useThreadTabs(): ThreadTabs {
     close,
     closeOthers,
     closeAll,
+    closeRuntime,
     reorder,
     activate,
     activateNext,

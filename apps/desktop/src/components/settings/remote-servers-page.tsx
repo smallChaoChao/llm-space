@@ -27,6 +27,7 @@ import type {
   RemoteServerDraft,
   RemoteServerView,
 } from "@/shared/remote-servers";
+import type { RuntimeId } from "@/shared/runtime";
 
 import { SettingsPage } from "./settings-page";
 
@@ -59,7 +60,13 @@ function _emptyForm(): FormState {
   };
 }
 
-export function RemoteServersPage() {
+export function RemoteServersPage({
+  onConnected,
+  onDisconnected,
+}: {
+  onConnected?: (runtimeId: RuntimeId) => void;
+  onDisconnected?: (runtimeId: RuntimeId) => void;
+}) {
   const [servers, setServers] = useState<RemoteServerView[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -111,13 +118,24 @@ export function RemoteServersPage() {
 
   const run = async (
     id: string,
-    action: (id: string) => Promise<RemoteServerView[]>
+    action: (id: string) => Promise<RemoteServerView[]>,
+    options: { closeOnConnected?: boolean; notifyDisconnected?: boolean } = {}
   ) => {
     setBusyId(id);
     try {
+      const previousRuntimeId = servers.find(
+        (server) => server.id === id
+      )?.runtimeId;
       const next = await action(id);
       setServers(next);
       setSelectedId(id);
+      if (options.closeOnConnected) {
+        const connected = next.find((server) => server.id === id);
+        if (connected) onConnected?.(connected.runtimeId);
+      }
+      if (options.notifyDisconnected && previousRuntimeId) {
+        onDisconnected?.(previousRuntimeId);
+      }
     } catch (error) {
       toast.error("Remote server action failed", {
         description:
@@ -223,10 +241,22 @@ export function RemoteServersPage() {
             <RemoteServerDetails
               server={selected}
               busy={busyId === selected.id}
-              onConnect={() => void run(selected.id, connectRemoteServer)}
-              onDisconnect={() => void run(selected.id, disconnectRemoteServer)}
+              onConnect={() =>
+                void run(selected.id, connectRemoteServer, {
+                  closeOnConnected: true,
+                })
+              }
+              onDisconnect={() =>
+                void run(selected.id, disconnectRemoteServer, {
+                  notifyDisconnected: true,
+                })
+              }
               onEdit={() => startEdit(selected)}
-              onRemove={() => void run(selected.id, removeRemoteServer)}
+              onRemove={() =>
+                void run(selected.id, removeRemoteServer, {
+                  notifyDisconnected: true,
+                })
+              }
             />
           ) : (
             <div className="text-muted-foreground flex h-full items-center justify-center text-sm">

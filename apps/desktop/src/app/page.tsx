@@ -1,5 +1,8 @@
 import { FirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
-import { useModels } from "@llm-space/ui/components/model-provider";
+import {
+  useModels,
+  useRefreshModels,
+} from "@llm-space/ui/components/model-provider";
 import {
   LOCAL_STORAGE_KEYS,
   readLocalStorage,
@@ -11,6 +14,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@llm-space/ui/ui/resizable";
+import { useQueryClient } from "@tanstack/react-query";
 import { FileTextIcon, GitBranchIcon } from "lucide-react";
 import {
   lazy,
@@ -210,6 +214,8 @@ function PageInner() {
   const tabs = useThreadTabs();
   const { executeCommand } = useCommands();
   const models = useModels();
+  const refreshModels = useRefreshModels();
+  const queryClient = useQueryClient();
   const { tracingEnabled } = useExperimental();
 
   // The active tab is read through a ref so command handlers never go stale.
@@ -223,6 +229,7 @@ function PageInner() {
     close,
     closeOthers,
     closeAll,
+    closeRuntime,
     openTrace,
     reopenClosed,
     activateNext,
@@ -257,8 +264,28 @@ function PageInner() {
   const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
   const [workspaceRuntimeId, setWorkspaceRuntimeId] =
     useState<RuntimeId>("local");
+  const workspaceRuntimeIdRef = useRef<RuntimeId>("local");
+  useEffect(() => {
+    workspaceRuntimeIdRef.current = workspaceRuntimeId;
+  }, [workspaceRuntimeId]);
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
+
+  const switchWorkspaceRuntime = useCallback(
+    (nextRuntimeId: RuntimeId) => {
+      const current = workspaceRuntimeIdRef.current;
+      if (current !== nextRuntimeId && current.startsWith("remote:")) {
+        closeRuntime(current);
+      }
+      workspaceRuntimeIdRef.current = nextRuntimeId;
+      setWorkspaceRuntimeId(nextRuntimeId);
+      setSidebarMode("files");
+      void queryClient.invalidateQueries({ queryKey: ["fs"] });
+      void queryClient.invalidateQueries({ queryKey: ["thread"] });
+      void refreshModels();
+    },
+    [closeRuntime, queryClient, refreshModels]
+  );
 
   const refreshRuntimes = useCallback(
     async ({ syncDefault }: { syncDefault: boolean }) => {
@@ -266,19 +293,21 @@ function PageInner() {
         listRuntimes(),
         getDefaultRuntime(),
       ]);
-      setWorkspaceRuntimeId((current) => {
-        if (
-          syncDefault &&
-          next.some((runtime) => runtime.id === defaultRuntimeId)
-        ) {
-          return defaultRuntimeId;
-        }
-        return next.some((runtime) => runtime.id === current)
-          ? current
-          : "local";
-      });
+      const current = workspaceRuntimeIdRef.current;
+      const nextRuntimeId =
+        syncDefault && next.some((runtime) => runtime.id === defaultRuntimeId)
+          ? defaultRuntimeId
+          : next.some((runtime) => runtime.id === current)
+            ? current
+            : "local";
+      if (nextRuntimeId !== current) {
+        switchWorkspaceRuntime(nextRuntimeId);
+      } else {
+        workspaceRuntimeIdRef.current = nextRuntimeId;
+        setWorkspaceRuntimeId(nextRuntimeId);
+      }
     },
-    []
+    [switchWorkspaceRuntime]
   );
 
   useEffect(() => {
@@ -545,8 +574,9 @@ function PageInner() {
             )}
             <RemoteStatus
               runtimeId={workspaceRuntimeId}
-              onDisconnected={() => {
-                setWorkspaceRuntimeId("local");
+              onDisconnected={(runtimeId) => {
+                if (workspaceRuntimeIdRef.current !== runtimeId) return;
+                switchWorkspaceRuntime("local");
                 void refreshRuntimes({ syncDefault: true });
               }}
             />
@@ -606,6 +636,19 @@ function PageInner() {
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           onTabChange={setSettingsTab}
+          onRemoteConnected={(runtimeId) => {
+            setSettingsOpen(false);
+            switchWorkspaceRuntime(runtimeId);
+            void refreshRuntimes({ syncDefault: true });
+          }}
+          onRemoteDisconnected={(runtimeId) => {
+            if (workspaceRuntimeIdRef.current === runtimeId) {
+              switchWorkspaceRuntime("local");
+              void refreshRuntimes({ syncDefault: true });
+            } else if (runtimeId.startsWith("remote:")) {
+              closeRuntime(runtimeId);
+            }
+          }}
         />
       </LazyMount>
       <LazyMount open={commandPaletteOpen}>

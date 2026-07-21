@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   disconnectRemoteServer,
   listRemoteServers,
+  subscribeRemoteServersChanged,
 } from "@/client/remote-servers";
 import type { RemoteServerView } from "@/shared/remote-servers";
 import type { RuntimeId } from "@/shared/runtime";
@@ -17,27 +18,35 @@ export function RemoteStatus({
   onDisconnected,
 }: {
   runtimeId: RuntimeId;
-  onDisconnected: () => void;
+  onDisconnected: (runtimeId: RuntimeId) => void;
 }) {
   const [server, setServer] = useState<RemoteServerView | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    if (runtimeId === "local") {
-      setServer(null);
-      return;
-    }
-    void listRemoteServers()
-      .then((servers) => {
-        if (cancelled) return;
-        setServer(servers.find((item) => item.runtimeId === runtimeId) ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setServer(null);
-      });
+    const refresh = () => {
+      if (runtimeId === "local") {
+        setServer(null);
+        return;
+      }
+      void listRemoteServers()
+        .then((servers) => {
+          if (cancelled) return;
+          setServer(
+            servers.find((item) => item.runtimeId === runtimeId) ?? null
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setServer(null);
+        });
+    };
+
+    refresh();
+    const unsubscribe = subscribeRemoteServersChanged(refresh);
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [runtimeId]);
 
@@ -49,7 +58,7 @@ export function RemoteStatus({
     setBusy(true);
     try {
       await disconnectRemoteServer(server.id);
-      onDisconnected();
+      onDisconnected(runtimeId);
     } catch (error) {
       toast.error("Failed to disconnect remote", {
         description:

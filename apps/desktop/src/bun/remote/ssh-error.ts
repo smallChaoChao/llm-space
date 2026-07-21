@@ -1,0 +1,79 @@
+export type SshBootstrapStage =
+  | "server-start"
+  | "tunnel-start"
+  | "health-check";
+
+export interface SshBootstrapFailureInput {
+  stage: SshBootstrapStage;
+  label: string;
+  output: string;
+  target?: string;
+}
+
+const MAX_GENERIC_OUTPUT_LENGTH = 1200;
+
+export function formatSshBootstrapFailure({
+  stage,
+  label,
+  output,
+  target,
+}: SshBootstrapFailureInput): string {
+  const hostKeyFailure = _formatHostKeyFailure(output, target, stage);
+  if (hostKeyFailure) return hostKeyFailure;
+
+  const details = output.trim();
+  return [
+    `SSH remote runtime bootstrap failed during ${stage}: ${label} exited early.`,
+    details ? _truncate(details, MAX_GENERIC_OUTPUT_LENGTH) : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function _formatHostKeyFailure(
+  output: string,
+  target: string | undefined,
+  stage: SshBootstrapStage
+): string | null {
+  if (!_isHostKeyFailure(output)) return null;
+
+  const offending = /Offending \S+ key in ([^:\n]+):(\d+)/i.exec(output);
+  const knownHosts = offending?.[1];
+  const line = offending?.[2];
+  const location = knownHosts
+    ? `${knownHosts}${line ? ` line ${line}` : ""}`
+    : "your SSH known_hosts file";
+  const targetText = target ? ` for ${target}` : "";
+
+  return [
+    `SSH host key verification failed${targetText}.`,
+    _hostKeyImpact(stage),
+    `Confirm the host identity first, then update ${location}.`,
+  ].join(" ");
+}
+
+function _hostKeyImpact(stage: SshBootstrapStage): string {
+  if (stage === "server-start") {
+    return "OpenSSH reports that this host key changed or is not trusted, so the remote runtime command was not started.";
+  }
+  if (stage === "tunnel-start") {
+    return "OpenSSH reports that this host key changed or is not trusted, so port forwarding was disabled and LLM Space did not start the remote runtime.";
+  }
+  return "OpenSSH reports that this host key changed or is not trusted, so the SSH connection closed before LLM Space could verify the remote runtime.";
+}
+
+function _isHostKeyFailure(output: string): boolean {
+  const text = output.toLowerCase();
+  return (
+    text.includes("remote host identification has changed") ||
+    text.includes("forwarding disabled due to host key check failure") ||
+    text.includes("host key verification failed") ||
+    (text.includes("man-in-the-middle attack") &&
+      text.includes("known_hosts"))
+  );
+}
+
+function _truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}...`;
+}

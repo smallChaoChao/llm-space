@@ -7,6 +7,7 @@ import { spawnManagedProcess, type ManagedProcess } from "./process-utils";
 import { RemoteRuntimeClient } from "./remote-runtime-client";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import { buildRemoteServerArgs, buildTunnelArgs } from "./ssh-command";
+import { formatSshBootstrapFailure } from "./ssh-error";
 
 export interface SshRemoteRuntimeHandle {
   client: RemoteRuntimeClient;
@@ -27,7 +28,7 @@ export async function startSshRemoteRuntime(
       buildRemoteServerArgs({ config, token })
     );
     processes.push(serverProcess);
-    await _waitForProcessAlive(serverProcess, "server-start");
+    await _waitForProcessAlive(serverProcess, "server-start", config);
 
     const tunnelProcess = spawnManagedProcess(
       "ssh tunnel",
@@ -35,7 +36,7 @@ export async function startSshRemoteRuntime(
       buildTunnelArgs({ config, localPort })
     );
     processes.push(tunnelProcess);
-    await _waitForProcessAlive(tunnelProcess, "tunnel-start");
+    await _waitForProcessAlive(tunnelProcess, "tunnel-start", config);
 
     const client = new RemoteRuntimeClient({
       id: config.id,
@@ -43,7 +44,7 @@ export async function startSshRemoteRuntime(
       baseUrl: `http://127.0.0.1:${localPort}`,
       token,
     });
-    await _waitForHealth(client, processes);
+    await _waitForHealth(client, processes, config);
 
     return {
       client,
@@ -64,19 +65,26 @@ function _generateToken(): string {
 
 async function _waitForProcessAlive(
   process: ManagedProcess,
-  stage: "server-start" | "tunnel-start"
+  stage: "server-start" | "tunnel-start",
+  config: SshRemoteRuntimeConfig
 ): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 250));
   if (process.child.exitCode !== null || process.child.signalCode !== null) {
     throw new Error(
-      `SSH remote runtime bootstrap failed during ${stage}: ${process.label} exited early. ${process.output()}`
+      formatSshBootstrapFailure({
+        stage,
+        label: process.label,
+        output: process.output(),
+        target: config.user ? `${config.user}@${config.host}` : config.host,
+      })
     );
   }
 }
 
 async function _waitForHealth(
   client: RemoteRuntimeClient,
-  processes: ManagedProcess[]
+  processes: ManagedProcess[],
+  config: SshRemoteRuntimeConfig
 ): Promise<void> {
   const deadline = Date.now() + 30_000;
   let lastError: unknown;
@@ -87,7 +95,12 @@ async function _waitForHealth(
         process.child.signalCode !== null
       ) {
         throw new Error(
-          `SSH remote runtime bootstrap failed during health-check: ${process.label} exited early. ${process.output()}`
+          formatSshBootstrapFailure({
+            stage: "health-check",
+            label: process.label,
+            output: process.output(),
+            target: config.user ? `${config.user}@${config.host}` : config.host,
+          })
         );
       }
     }

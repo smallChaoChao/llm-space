@@ -3,7 +3,11 @@ import path from "node:path";
 
 import { uuid } from "@llm-space/core";
 import { getSettingsDir } from "@llm-space/core/server";
-import type { RuntimeId, RuntimeRouter } from "@llm-space/runtime/runtime";
+import type {
+  RuntimeClient,
+  RuntimeId,
+  RuntimeRouter,
+} from "@llm-space/runtime/runtime";
 
 import type {
   RemoteServerConfig,
@@ -14,8 +18,16 @@ import type {
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import {
   startSshRemoteRuntime,
-  type SshRemoteRuntimeHandle,
 } from "./ssh-remote-runtime";
+
+interface RemoteRuntimeHandle {
+  client: RuntimeClient;
+  stop(): Promise<void> | void;
+}
+
+type StartSshRemoteRuntime = (
+  config: SshRemoteRuntimeConfig
+) => Promise<RemoteRuntimeHandle>;
 
 interface RemoteServersConfigFile {
   servers: RemoteServerConfig[];
@@ -23,15 +35,20 @@ interface RemoteServersConfigFile {
 
 interface ConnectedServer {
   status: "connected" | "connecting" | "error";
-  handle?: SshRemoteRuntimeHandle;
+  handle?: RemoteRuntimeHandle;
   error?: string;
 }
 
 export class RemoteServerManager {
   private _servers: RemoteServerConfig[];
   private readonly _connections = new Map<string, ConnectedServer>();
+  private _operationQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly _runtimeRouter: RuntimeRouter) {
+  constructor(
+    private readonly _runtimeRouter: RuntimeRouter,
+    private readonly _startSshRemoteRuntime: StartSshRemoteRuntime =
+      startSshRemoteRuntime
+  ) {
     this._servers = this._load();
   }
 
@@ -68,25 +85,34 @@ export class RemoteServerManager {
   }
 
   async removeServer(id: string): Promise<RemoteServerView[]> {
-    await this.disconnectServer(id);
-    const next = this._servers.filter((server) => server.id !== id);
-    if (next.length === this._servers.length) {
-      throw new Error(`Remote server not found: ${id}`);
-    }
-    this._servers = next;
-    this._save();
-    return this.listServers();
+    return this._enqueue(async () => {
+      await this._disconnectServer(id);
+      const next = this._servers.filter((server) => server.id !== id);
+      if (next.length === this._servers.length) {
+        throw new Error(`Remote server not found: ${id}`);
+      }
+      this._servers = next;
+      this._save();
+      return this.listServers();
+    });
   }
 
   async connectServer(id: string): Promise<RemoteServerView[]> {
+    return this._enqueue(() => this._connectServer(id));
+  }
+
+  private async _connectServer(id: string): Promise<RemoteServerView[]> {
     const server = this._find(id);
     const existing = this._connections.get(id);
     if (existing?.status === "connected") {
+      this._runtimeRouter.setDefaultRuntime(this._runtimeId(id));
       return this.listServers();
     }
+
+    await this._disconnectOtherServers(id);
     this._connections.set(id, { status: "connecting" });
     try {
-      const handle = await startSshRemoteRuntime(this._sshConfig(server));
+      const handle = await this._startSshRemoteRuntime(this._sshConfig(server));
       const runtimeId = this._runtimeId(server.id);
       this._runtimeRouter.register(runtimeId, handle.client);
       this._runtimeRouter.setDefaultRuntime(runtimeId);
@@ -102,6 +128,10 @@ export class RemoteServerManager {
   }
 
   async disconnectServer(id: string): Promise<RemoteServerView[]> {
+    return this._enqueue(() => this._disconnectServer(id));
+  }
+
+  private async _disconnectServer(id: string): Promise<RemoteServerView[]> {
     const connection = this._connections.get(id);
     if (connection?.handle) {
       await connection.handle.stop();
@@ -119,6 +149,14 @@ export class RemoteServerManager {
     return this.listServers();
   }
 
+  private async _disconnectOtherServers(keepId: string): Promise<void> {
+    await Promise.all(
+      [...this._connections.keys()]
+        .filter((id) => id !== keepId)
+        .map((id) => this._disconnectServer(id))
+    );
+  }
+
   setDefaultRuntime(runtimeId: RuntimeId): RemoteServerView[] {
     this._runtimeRouter.setDefaultRuntime(runtimeId);
     return this.listServers();
@@ -129,9 +167,20 @@ export class RemoteServerManager {
   }
 
   async shutdown(): Promise<void> {
-    await Promise.all(
-      [...this._connections.keys()].map((id) => this.disconnectServer(id))
+    await this._enqueue(() =>
+      Promise.all(
+        [...this._connections.keys()].map((id) => this._disconnectServer(id))
+      ).then(() => undefined)
     );
+  }
+
+  private _enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this._operationQueue.then(operation, operation);
+    this._operationQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   private _view(server: RemoteServerConfig): RemoteServerView {
