@@ -59,7 +59,18 @@ export type RemoteRuntimeRpcMethod =
   | "skills.setSkillHidden"
   | "skills.setAllSkillsHidden"
   | "skills.listSkills"
-  | "skills.readSkill";
+  | "skills.readSkill"
+  | "trace.listProjects"
+  | "trace.createProject"
+  | "trace.createConnectedProject"
+  | "trace.listTraces"
+  | "trace.importLangfuseJson"
+  | "trace.searchLangfuseTraces"
+  | "trace.syncLangfuseTraces"
+  | "trace.readTrace"
+  | "trace.readOrCreateWorkbench"
+  | "trace.updateTraceTitle"
+  | "trace.writeWorkbench";
 
 export interface RemoteRuntimeRpcRequest<TParams = unknown> {
   id: string;

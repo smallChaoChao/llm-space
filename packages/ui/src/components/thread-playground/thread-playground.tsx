@@ -163,7 +163,7 @@ function _ThreadPlayground({
       executeTool: executeTool
         ? (tool, args) => executeTool(tool, args, { runtimeId })
         : undefined,
-      loadSkills: () => listEnabledPromptVariableSkills(skills),
+      loadSkills: () => listEnabledPromptVariableSkills(skills, { runtimeId }),
       loadFile: (path) => files.readText(path),
       fileExists: (path) => files.exists(path),
     })

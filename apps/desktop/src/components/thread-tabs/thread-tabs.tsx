@@ -77,7 +77,8 @@ interface ThreadTabsProps {
   onTraceTitleChange?: (
     projectId: string,
     traceKey: string,
-    title: string
+    title: string,
+    runtimeId: RuntimeId
   ) => void;
   onToggleSidebar?: () => void;
   /** Extra content pinned at the right end of the tab strip, before "+". */
@@ -383,6 +384,7 @@ export function ThreadTabs({
               key={tab.id}
               projectId={tab.projectId}
               traceKey={tab.traceKey}
+              runtimeId={tab.runtimeId}
               active={tab.id === activeId}
               refreshNonce={tab.refreshNonce ?? 0}
               onClose={close}

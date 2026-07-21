@@ -454,57 +454,68 @@ export interface DesktopRPCType {
       };
       // List trace projects for the dedicated Trace Panel.
       traceListProjects: {
-        params: Record<string, never>;
+        params: RuntimeScopedParams;
         response: TraceProject[];
       };
       // Create a manual Langfuse trace project under `traces/projects`.
       traceCreateProject: {
-        params: { name: string };
+        params: RuntimeScopedParams & { name: string };
         response: TraceProject;
       };
       // Create a connected Langfuse project after validating credentials.
       traceCreateConnectedProject: {
-        params: TraceConnectedProjectInput;
+        params: RuntimeScopedParams & TraceConnectedProjectInput;
         response: TraceProject;
       };
       // List trace summaries for one trace project.
       traceListTraces: {
-        params: { projectId: string };
+        params: RuntimeScopedParams & { projectId: string };
         response: TraceRecord[];
       };
       // Import renderer-read Langfuse JSON files into one trace project.
       traceImportLangfuseJson: {
-        params: { projectId: string; files: TraceImportFile[] };
+        params: RuntimeScopedParams & { projectId: string; files: TraceImportFile[] };
         response: TraceImportResult;
       };
       // Search a bounded remote Langfuse trace list for explicit user sync.
       traceSearchLangfuseTraces: {
-        params: { projectId: string; filters?: TraceLangfuseSearchInput };
+        params: RuntimeScopedParams & {
+          projectId: string;
+          filters?: TraceLangfuseSearchInput;
+        };
         response: TraceRemoteTraceSummary[];
       };
       // Sync selected remote Langfuse trace ids into local trace storage.
       traceSyncLangfuseTraces: {
-        params: { projectId: string; traceIds: string[] };
+        params: RuntimeScopedParams & { projectId: string; traceIds: string[] };
         response: TraceSyncResult;
       };
       // Read a trace summary by key without creating a workbench.
       traceReadTrace: {
-        params: { projectId: string; traceKey: string };
+        params: RuntimeScopedParams & { projectId: string; traceKey: string };
         response: TraceRecord;
       };
       // Read or lazily create the editable ThreadPlayground workbench.
       traceReadOrCreateWorkbench: {
-        params: { projectId: string; traceKey: string };
+        params: RuntimeScopedParams & { projectId: string; traceKey: string };
         response: TraceWorkbenchResponse;
       };
       // Rename a trace summary and keep its editable workbench title in sync.
       traceUpdateTraceTitle: {
-        params: { projectId: string; traceKey: string; title: string };
+        params: RuntimeScopedParams & {
+          projectId: string;
+          traceKey: string;
+          title: string;
+        };
         response: TraceWorkbenchResponse;
       };
       // Persist a trace workbench thread; raw trace data remains immutable.
       traceWriteWorkbench: {
-        params: { projectId: string; traceKey: string; thread: Thread };
+        params: RuntimeScopedParams & {
+          projectId: string;
+          traceKey: string;
+          thread: Thread;
+        };
         response: null;
       };
       // Update settings + the "we just updated" signal (pulled once on mount,

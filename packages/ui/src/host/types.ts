@@ -26,9 +26,11 @@ export interface ToolCallResult {
 }
 
 /** Options for invoking an executable tool. */
-export interface ExecuteToolOptions {
+export interface RuntimeScopedHostOptions {
   runtimeId?: string;
 }
+
+export interface ExecuteToolOptions extends RuntimeScopedHostOptions {}
 
 /** Invoke an executable tool (built-in or MCP). */
 export type ExecuteTool = (
@@ -39,19 +41,25 @@ export type ExecuteTool = (
 
 /** Read-only skills access used by prompt variables + examples. */
 export interface SkillsHost {
-  getSettings(): Promise<SkillsSettings>;
-  listSkills(path: string): Promise<SkillInfo[]>;
+  getSettings(options?: RuntimeScopedHostOptions): Promise<SkillsSettings>;
+  listSkills(
+    path: string,
+    options?: RuntimeScopedHostOptions
+  ): Promise<SkillInfo[]>;
 }
 
 /** Read-only MCP access used by the tool-import UI. */
 export interface McpHost {
-  listServers(): Promise<McpServerView[]>;
-  listTools(serverId: string): Promise<McpServerToolsResponse>;
+  listServers(options?: RuntimeScopedHostOptions): Promise<McpServerView[]>;
+  listTools(
+    serverId: string,
+    options?: RuntimeScopedHostOptions
+  ): Promise<McpServerToolsResponse>;
 }
 
 /** Built-in tool listing + OS filesystem reveal action. */
 export interface BuiltinToolsHost {
-  list(): Promise<BuiltinTool[]>;
+  list(options?: RuntimeScopedHostOptions): Promise<BuiltinTool[]>;
   /** Open a directory itself, or reveal a file selected in its parent folder. */
   fsReveal(path: string): Promise<void>;
 }

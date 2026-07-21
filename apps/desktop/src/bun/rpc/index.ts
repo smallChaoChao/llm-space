@@ -31,7 +31,6 @@ import {
 import type { RemoteServerManager } from "../remote";
 import type { RuntimeRouter } from "../runtime";
 import type { SkillsManager } from "../skills";
-import type { TraceManager } from "../traces";
 import type { UpdaterService } from "../updates";
 
 import { ensureRootDir } from "./ensure-root-dir";
@@ -60,7 +59,6 @@ export interface MainWindowRPCDependencies {
   runtimeRouter: RuntimeRouter;
   remoteServerManager: RemoteServerManager;
   skillsManager: SkillsManager;
-  traceManager: TraceManager;
   updater: UpdaterService;
 }
 
@@ -78,7 +76,6 @@ export function createMainWindowRPC({
   runtimeRouter,
   remoteServerManager,
   skillsManager,
-  traceManager,
   updater,
 }: MainWindowRPCDependencies): MainWindowRPC {
   const getRuntime = runtimeRouter.get.bind(runtimeRouter);
@@ -355,25 +352,59 @@ export function createMainWindowRPC({
           Promise.resolve(getRuntime(runtimeId).skillsListSkills(path)),
         skillsReadSkill: ({ runtimeId, path }) =>
           Promise.resolve(getRuntime(runtimeId).skillsReadSkill(path)),
-        traceListProjects: () => traceManager.listProjects(),
-        traceCreateProject: ({ name }) => traceManager.createProject(name),
-        traceCreateConnectedProject: (input) =>
-          traceManager.createConnectedProject(input),
-        traceListTraces: ({ projectId }) => traceManager.listTraces(projectId),
-        traceImportLangfuseJson: ({ projectId, files }) =>
-          traceManager.importLangfuseJson(projectId, files),
-        traceSearchLangfuseTraces: ({ projectId, filters }) =>
-          traceManager.searchLangfuseTraces({ projectId, filters }),
-        traceSyncLangfuseTraces: ({ projectId, traceIds }) =>
-          traceManager.syncLangfuseTraces({ projectId, traceIds }),
-        traceReadTrace: ({ projectId, traceKey }) =>
-          traceManager.readTrace(projectId, traceKey),
-        traceReadOrCreateWorkbench: ({ projectId, traceKey }) =>
-          traceManager.readOrCreateWorkbench(projectId, traceKey),
-        traceUpdateTraceTitle: ({ projectId, traceKey, title }) =>
-          traceManager.updateTraceTitle(projectId, traceKey, title),
-        traceWriteWorkbench: async ({ projectId, traceKey, thread }) => {
-          await traceManager.writeWorkbench(projectId, traceKey, thread);
+        traceListProjects: ({ runtimeId }) =>
+          Promise.resolve(getRuntime(runtimeId).traceListProjects()),
+        traceCreateProject: ({ runtimeId, name }) =>
+          Promise.resolve(getRuntime(runtimeId).traceCreateProject(name)),
+        traceCreateConnectedProject: ({ runtimeId, ...input }) =>
+          Promise.resolve(
+            getRuntime(runtimeId).traceCreateConnectedProject(input)
+          ),
+        traceListTraces: ({ runtimeId, projectId }) =>
+          Promise.resolve(getRuntime(runtimeId).traceListTraces(projectId)),
+        traceImportLangfuseJson: ({ runtimeId, projectId, files }) =>
+          Promise.resolve(
+            getRuntime(runtimeId).traceImportLangfuseJson(projectId, files)
+          ),
+        traceSearchLangfuseTraces: ({ runtimeId, projectId, filters }) =>
+          Promise.resolve(
+            getRuntime(runtimeId).traceSearchLangfuseTraces({
+              projectId,
+              filters,
+            })
+          ),
+        traceSyncLangfuseTraces: ({ runtimeId, projectId, traceIds }) =>
+          Promise.resolve(
+            getRuntime(runtimeId).traceSyncLangfuseTraces({
+              projectId,
+              traceIds,
+            })
+          ),
+        traceReadTrace: ({ runtimeId, projectId, traceKey }) =>
+          Promise.resolve(
+            getRuntime(runtimeId).traceReadTrace(projectId, traceKey)
+          ),
+        traceReadOrCreateWorkbench: ({ runtimeId, projectId, traceKey }) =>
+          Promise.resolve(
+            getRuntime(runtimeId).traceReadOrCreateWorkbench(
+              projectId,
+              traceKey
+            )
+          ),
+        traceUpdateTraceTitle: ({ runtimeId, projectId, traceKey, title }) =>
+          Promise.resolve(
+            getRuntime(runtimeId).traceUpdateTraceTitle(
+              projectId,
+              traceKey,
+              title
+            )
+          ),
+        traceWriteWorkbench: async ({ runtimeId, projectId, traceKey, thread }) => {
+          await getRuntime(runtimeId).traceWriteWorkbench(
+            projectId,
+            traceKey,
+            thread
+          );
           return null;
         },
         updateMode: () => updater.getUpdateModeSetting(),

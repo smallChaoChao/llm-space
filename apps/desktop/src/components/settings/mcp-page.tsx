@@ -225,8 +225,8 @@ export function McpPage({ runtimeId }: { runtimeId: RuntimeId }) {
       const draft = _draftFromForm(form);
       const next =
         creating || !selectedId
-          ? await addMcpServer(draft)
-          : await updateMcpServer(selectedId, draft);
+          ? await addMcpServer(draft, runtimeId)
+          : await updateMcpServer(selectedId, draft, runtimeId);
       setServers(next);
       const saved =
         creating || !selectedId

@@ -439,9 +439,10 @@ function PageInner() {
         projectId: trace.projectId,
         traceKey: trace.key,
         title: trace.title,
+        runtimeId: workspaceRuntimeId,
       });
     },
-    [openTrace]
+    [openTrace, workspaceRuntimeId]
   );
   const handleCloseTab = useCallback(
     (id: string) => executeCommand({ type: "closeTab", args: { id } }),
@@ -566,6 +567,7 @@ function PageInner() {
                       : "hidden"
                   }
                   onOpenTrace={handleOpenTrace}
+                  runtimeId={workspaceRuntimeId}
                 />
               </LazyMount>
             )}

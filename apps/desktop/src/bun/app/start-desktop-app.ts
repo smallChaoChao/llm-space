@@ -64,7 +64,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
   const gistWriter = new GistThreadWriter({
     getToken: () => githubAuth.getAccessToken(),
   });
-  const traceManager = new TraceManager();
+  const traceManager = new TraceManager({ homePath });
   const streaming = new StreamThreadController(modelManager, analytics);
   const host = new DesktopHost({
     modules: [
@@ -88,6 +88,7 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
     skillsManager,
     streaming,
     tools: host.tools,
+    traceManager,
     rmPath: async (workspacePath) => {
       const abs = localFs.realpath(workspacePath);
       if (abs === localFs.realpath("")) {
@@ -161,7 +162,6 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       runtimeRouter,
       remoteServerManager,
       skillsManager,
-      traceManager,
       updater,
     });
     mainWindow = await createMainWindow({ rpc, executeCommand });

@@ -25,13 +25,14 @@ export interface ThreadTab {
   refreshNonce?: number;
 }
 
-/** An open imported trace workbench tab. `id` is `trace:{projectId}:{traceKey}`. */
+/** An open imported trace workbench tab. `id` is `trace:{runtimeId}:{projectId}:{traceKey}`. */
 export interface TraceTab {
   id: string;
   type: "trace";
   projectId: string;
   traceKey: string;
   title: string;
+  runtimeId: RuntimeId;
   refreshNonce?: number;
 }
 
@@ -40,7 +41,13 @@ export type AppTab = ThreadTab | TraceTab;
 
 type PersistedTab =
   | { type: "thread"; path: string; runtimeId?: RuntimeId }
-  | { type: "trace"; projectId: string; traceKey: string; title?: string };
+  | {
+      type: "trace";
+      projectId: string;
+      traceKey: string;
+      title?: string;
+      runtimeId?: RuntimeId;
+    };
 
 /** Derive a tab label from an app tab. */
 export function tabLabel(tab: AppTab): string {
@@ -65,6 +72,7 @@ export interface ThreadTabs {
     projectId: string;
     traceKey: string;
     title: string;
+    runtimeId?: RuntimeId;
   }) => void;
   /** Close a tab by app-tab id; if it was active, focus its nearest neighbor. */
   close: (id: string) => void;
@@ -94,7 +102,8 @@ export interface ThreadTabs {
   handleTraceTitleChange: (
     projectId: string,
     traceKey: string,
-    title: string
+    title: string,
+    runtimeId?: RuntimeId
   ) => void;
   /**
    * Reopen the most recently closed tab group, silently skipping files or traces
@@ -107,8 +116,12 @@ function _threadTabId(path: string, runtimeId: RuntimeId = "local"): string {
   return `thread:${runtimeId}:${path}`;
 }
 
-function _traceTabId(projectId: string, traceKey: string): string {
-  return `trace:${projectId}:${traceKey}`;
+function _traceTabId(
+  projectId: string,
+  traceKey: string,
+  runtimeId: RuntimeId = "local"
+): string {
+  return `trace:${runtimeId}:${projectId}:${traceKey}`;
 }
 
 function _createThreadTab(
@@ -128,17 +141,20 @@ function _createTraceTab({
   projectId,
   traceKey,
   title,
+  runtimeId = "local",
 }: {
   projectId: string;
   traceKey: string;
   title: string;
+  runtimeId?: RuntimeId;
 }): TraceTab {
   return {
-    id: _traceTabId(projectId, traceKey),
+    id: _traceTabId(projectId, traceKey, runtimeId),
     type: "trace",
     projectId,
     traceKey,
     title,
+    runtimeId,
   };
 }
 
@@ -150,6 +166,7 @@ function _persistable(tab: AppTab): PersistedTab {
         projectId: tab.projectId,
         traceKey: tab.traceKey,
         title: tab.title,
+        runtimeId: tab.runtimeId,
       };
 }
 
@@ -162,6 +179,7 @@ function _fromPersisted(tab: PersistedTab): AppTab | null {
       projectId: tab.projectId,
       traceKey: tab.traceKey,
       title: tab.title || tab.traceKey,
+      runtimeId: tab.runtimeId ?? "local",
     });
   }
   return null;
@@ -258,7 +276,7 @@ async function _threadFileExists(
 
 async function _traceExists(tab: TraceTab): Promise<boolean> {
   try {
-    await traceClient.readTrace(tab.projectId, tab.traceKey);
+    await traceClient.readTrace(tab.projectId, tab.traceKey, tab.runtimeId);
     return true;
   } catch {
     return false;
@@ -348,12 +366,14 @@ export function useThreadTabs(): ThreadTabs {
       projectId,
       traceKey,
       title,
+      runtimeId = "local",
     }: {
       projectId: string;
       traceKey: string;
       title: string;
+      runtimeId?: RuntimeId;
     }) => {
-      const id = _traceTabId(projectId, traceKey);
+      const id = _traceTabId(projectId, traceKey, runtimeId);
       if (tabsRef.current.some((tab) => tab.id === id)) {
         setActiveId(id);
         return;
@@ -361,7 +381,7 @@ export function useThreadTabs(): ThreadTabs {
       setTabs((prev) =>
         prev.some((tab) => tab.id === id)
           ? prev
-          : [...prev, _createTraceTab({ projectId, traceKey, title })]
+          : [...prev, _createTraceTab({ projectId, traceKey, title, runtimeId })]
       );
       setActiveId(id);
     },
@@ -437,11 +457,11 @@ export function useThreadTabs(): ThreadTabs {
     (runtimeId: RuntimeId) => {
       setTabs((prev) => {
         const closed = prev.filter(
-          (tab) => tab.type === "thread" && tab.runtimeId === runtimeId
+          (tab) => tab.runtimeId === runtimeId
         );
         if (closed.length === 0) return prev;
         const next = prev.filter(
-          (tab) => tab.type !== "thread" || tab.runtimeId !== runtimeId
+          (tab) => tab.runtimeId !== runtimeId
         );
         pushClosed(closed);
         setActiveId((current) =>
@@ -582,8 +602,13 @@ export function useThreadTabs(): ThreadTabs {
   }, []);
 
   const handleTraceTitleChange = useCallback(
-    (projectId: string, traceKey: string, title: string) => {
-      const id = _traceTabId(projectId, traceKey);
+    (
+      projectId: string,
+      traceKey: string,
+      title: string,
+      runtimeId: RuntimeId = "local"
+    ) => {
+      const id = _traceTabId(projectId, traceKey, runtimeId);
       setTabs((prev) =>
         prev.map((tab) =>
           tab.id === id && tab.type === "trace" ? { ...tab, title } : tab

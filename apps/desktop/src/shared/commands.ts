@@ -139,7 +139,7 @@ export interface ImportFromClipboardCommand extends GenericCommand<
  */
 export interface CreateTraceProjectCommand extends GenericCommand<
   "createTraceProject",
-  { name: string }
+  { name: string; runtimeId?: RuntimeId }
 > {}
 
 /**
@@ -148,7 +148,7 @@ export interface CreateTraceProjectCommand extends GenericCommand<
  */
 export interface CreateConnectedTraceProjectCommand extends GenericCommand<
   "createConnectedTraceProject",
-  TraceConnectedProjectInput
+  TraceConnectedProjectInput & { runtimeId?: RuntimeId }
 > {}
 
 /**
@@ -158,13 +158,13 @@ export interface CreateConnectedTraceProjectCommand extends GenericCommand<
  */
 export interface ImportLangfuseTraceFilesCommand extends GenericCommand<
   "importLangfuseTraceFiles",
-  { projectId: string; files: TraceImportFile[] }
+  { projectId: string; files: TraceImportFile[]; runtimeId?: RuntimeId }
 > {}
 
 /** Sync selected remote Langfuse trace ids into a connected trace project. */
 export interface SyncLangfuseTraceIdsCommand extends GenericCommand<
   "syncLangfuseTraceIds",
-  { projectId: string; traceIds: string[] }
+  { projectId: string; traceIds: string[]; runtimeId?: RuntimeId }
 > {}
 
 // --- Tabs ------------------------------------------------------------------

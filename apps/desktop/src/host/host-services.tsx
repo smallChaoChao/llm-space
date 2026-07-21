@@ -108,10 +108,21 @@ export function DesktopHostProvider({ children }: { children: ReactNode }) {
       presentational: false,
       transport,
       executeTool,
-      skills: { getSettings: getSkillsSettings, listSkills },
-      mcp: { listServers: listMcpServers, listTools: listMcpTools },
+      skills: {
+        getSettings: (options) =>
+          getSkillsSettings(options?.runtimeId as RuntimeId | undefined),
+        listSkills: (path, options) =>
+          listSkills(path, options?.runtimeId as RuntimeId | undefined),
+      },
+      mcp: {
+        listServers: (options) =>
+          listMcpServers(options?.runtimeId as RuntimeId | undefined),
+        listTools: (serverId, options) =>
+          listMcpTools(serverId, options?.runtimeId as RuntimeId | undefined),
+      },
       builtinTools: {
-        list: listBuiltInTools,
+        list: (options) =>
+          listBuiltInTools(options?.runtimeId as RuntimeId | undefined),
         fsReveal,
       },
       paths: { ensureRootDir },

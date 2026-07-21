@@ -9,3 +9,4 @@ export * from "./streaming";
 export * from "./tools";
 export * from "./tools/built-in";
 export * from "./remote-protocol";
+export * from "./traces";

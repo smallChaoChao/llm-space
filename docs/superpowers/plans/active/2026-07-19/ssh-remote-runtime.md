@@ -3619,3 +3619,590 @@ apps/desktop/src/bun/remote/remote-runtime-client.test.ts
 - Share remote thread 的完整产品化。
 
 [2026-07-21 00:20:00+08:00] 修改说明：补充 Milestone 7 剩余 UI runtimeId 透传和 Settings runtime 化方案。理由：用户要求把步骤 7 剩余内容全部细化并在 review 后继续开发，避免协议层完成但 UI 仍依赖 default runtime 的风险。
+
+---
+
+## Milestone 7 完整收口 ExecPlan：远程 MCP、built-in tools、skills、search、network、trace
+
+本节覆盖 Milestone 7 所有未完成部分，并取代上方“Trace remote 化不在本节完成”的临时判断。用户已明确要求 Milestone 7 标题中的全部能力都要细化完善，因此本轮必须把 trace remote 化纳入设计范围；若执行中发现 trace 迁移成本超过本里程碑可控范围，必须回到 Phase 3 让用户确认降级，而不能静默遗留。
+
+### 目标与全局视角
+
+完成后，用户可以同时打开 local runtime 和 remote runtime，并且所有与 agent 调试相关的能力都按当前 thread tab 或 Settings 选择的 runtime 精确路由：MCP server 在远端启动，built-in tool 在远端 workspace 执行，skills/search/network/models 配置写入远端 home，trace project 和 trace workbench 存储在远端 server 的 `LLM_SPACE_HOME/traces` 下。用户不需要把 remote 设成 default runtime 才能避免串路由。
+
+用户可观察结果：
+
+- 在 local tab 添加 built-in tool，看到本地 tool 列表；在 remote tab 添加 built-in tool，看到远端 server 提供的 tool 列表。
+- 在 remote tab 执行 `bash` / `read` / `grep` 等 built-in tool，命令和文件访问发生在远端 workspace。
+- 在 Settings 选择 remote runtime 后新增 stdio MCP server，MCP 进程由远端 server 机器启动；local MCP settings 不变化。
+- 在 Settings 选择 remote runtime 后修改 Search、Network、Skills、Models，配置写入远端 `settings/`，不写本地 `~/.llm-space/settings`。
+- 在 remote runtime 的 trace panel 中创建/导入/同步 trace，trace 文件写入远端 `traces/`，打开的 trace workbench agent run 和 tool call 走同一个 remote runtime。
+
+### 当前事实基线
+
+当前分支与 SHA：
+
+```text
+branch: feat/support-ssh-remote
+sha: 95361996429c94c0632811fe0ecf06de48409c77
+```
+
+当前工作树存在一个非本计划产生的改动：
+
+```text
+ M .gitignore
+```
+
+内容是新增忽略 `/docs/superpowers/plans/`。执行本计划时不得擅自回滚该改动，但需要提醒用户：如果计划文档需要随代码提交，忽略整个 plans 目录会让新增计划文件不易进入版本控制；当前 active 计划文件如已被 Git 跟踪仍可被提交。
+
+当前代码已完成的部分：
+
+- `packages/runtime/src/remote-protocol.ts` 已有 MCP、models、built-in tools、search、network、skills 的 RPC method 定义。
+- `apps/server/src/rpc.ts` 已 dispatch MCP、models、built-in tools、search、network、skills 方法。
+- `apps/desktop/src/bun/remote/remote-runtime-client.ts` 已实现上述远程方法。
+- `ThreadPlayground`、`thread-store`、`useToolCallRunner` 和 `apps/desktop/src/client/tool-execution.ts` 已让 tool execution 的主要路径携带 `runtimeId`。
+- `SettingsDialog` 已可给 Models/Search/Network/Skills/MCP 页面传 `runtimeId`，Search/Network/Skills 的多数组件调用已使用该参数。
+
+当前未完成或有 bug 的部分：
+
+- `apps/desktop/src/components/settings/mcp-page.tsx` 的 `save()` 中 `addMcpServer(draft)` / `updateMcpServer(selectedId, draft)` 没有传 `runtimeId`，会落到 default runtime。
+- `packages/ui/src/host/types.ts` 中 `SkillsHost`、`McpHost`、`BuiltinToolsHost` 的 list/read 方法没有 `runtimeId` option，导致 Thread Playground 的 tool import 和 prompt-variable skills 仍可能取 default runtime。
+- `apps/desktop/src/host/host-services.tsx` 中 HostServices 注入的是全局函数，未为 `mcp.listServers`、`mcp.listTools`、`builtinTools.list`、`skills.getSettings`、`skills.listSkills` 透传 runtimeId。
+- `packages/ui/src/components/thread-playground/tool/mcp-tool-import-popover.tsx`、`built-in-tool-import-dialog.tsx`、`variable/prompt-variable-skills.ts`、`examples/prompts.ts` 仍调用无 runtime 参数的 host 方法。
+- `apps/desktop/src/client/traces.ts` 无 `runtimeId`，trace RPC 只访问 Desktop bun 本地 `TraceManager`。
+- `apps/desktop/src/bun/rpc/index.ts` 的 trace handlers 直接调用本地 `traceManager`，未经过 `RuntimeRouter`。
+- `packages/runtime/src/remote-protocol.ts` 与 `apps/server/src/rpc.ts` 没有 trace RPC method。
+- `TraceManager` 仍固定使用 import-time 常量 `TRACE_ROOT = path.join(getLlmSpaceHomePath(), "traces", "projects")`，不适合复用到 server runtime 或多 home 场景。
+- `trace-tab-pane.tsx` 创建 trace workbench 的 `ThreadPlayground` 没有 runtimeId；即使 trace 数据远程化，trace workbench 中 agent run/tool call 也会默认走 local/default runtime。
+
+### 进度追踪
+
+- [x] (2026-07-21 21:21:32+08:00) Phase 2 修订：完成 Milestone 7 全量未完成项设计，等待用户 Review。
+- [x] (2026-07-21 21:25:00+08:00) Phase 3 Review：用户确认将 trace remote 化纳入 Milestone 7 并开始执行。
+- [x] (2026-07-21 21:30:00+08:00) Milestone 7D：修复 Settings MCP runtimeId 丢失。
+- [x] (2026-07-21 21:32:00+08:00) Milestone 7E：HostServices list/read runtime 化，覆盖 MCP import、built-in import、prompt-variable skills。
+- [x] (2026-07-21 21:35:00+08:00) Milestone 7F：TraceManager runtime 化并抽入可复用 runtime 边界。
+- [x] (2026-07-21 21:38:00+08:00) Milestone 7G：Remote trace RPC、server dispatch、Desktop client/runtime 路由接入。
+- [x] (2026-07-21 21:40:00+08:00) Milestone 7H：Trace UI runtime 化，remote trace panel 与 trace workbench 不串 runtime。
+- [x] (2026-07-21 21:42:20+08:00) Milestone 7I：自动化验证、手动验收脚本和计划状态更新。
+
+### 意外发现
+
+- 观察：MCP Settings 页表面上接受了 `runtimeId`，但保存新增/更新 server 时漏传 runtimeId。
+  证据：`apps/desktop/src/components/settings/mcp-page.tsx` 中 `save()` 调用 `addMcpServer(draft)` 和 `updateMcpServer(selectedId, draft)`，而删除、断开、listTools 已传 `runtimeId`。
+
+- 观察：trace 目前完全是 Desktop 本地子系统，不属于 runtime 抽象。
+  证据：`apps/desktop/src/client/traces.ts` 没有 runtimeId；`apps/desktop/src/bun/rpc/index.ts` 的 trace handlers 直接调用 `traceManager`；`packages/runtime/src/remote-protocol.ts` 没有 trace methods。
+
+- 观察：`TraceManager` 的 home path 在模块加载时固定为本地 LLM_SPACE_HOME，不支持被 server composition 注入。
+  证据：`apps/desktop/src/bun/traces/trace-manager.ts` 顶部定义 `const TRACE_ROOT = path.join(getLlmSpaceHomePath(), "traces", "projects")`，构造函数无参数。
+
+### 决策日志
+
+- 决策：Milestone 7 收口必须修正所有“依赖 default runtime 的隐式路由”，而不是只满足单 remote/default 场景。
+  理由：用户同时打开 local 和 remote tab 是 Remote Runtime 的核心场景；隐式 default runtime 会造成配置误写、工具误执行，是高风险数据/环境串扰。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：HostServices 的 read/list 类接口统一采用 `options?: { runtimeId?: string }`，不让 `packages/ui` import desktop 的 `RuntimeId` 类型。
+  理由：`@llm-space/ui` 必须保持 Electrobun-free 和 desktop-free；string option 能保持包边界，同时与 `ExecuteToolOptions` 一致。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：trace remote 化不通过“把 trace manager 挂进 HostServices”实现，而是进入 runtime/RPC 层，和 workspace、MCP、tools 走同一 runtime 路由。
+  理由：trace workbench 会启动 agent run 和 tool call，必须与 owning runtime 一致；如果 trace panel 仍是 host-local 能力，会再次形成串路由。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：`TraceManager` 先改为可注入 `homePath` / `traceRoot`，再考虑移动到 `packages/runtime` 或从 `apps/desktop` 共享到 server。
+  理由：最小长期正确改法是先解除 import-time 本地 home 绑定；完整移动可在保持接口稳定后执行，降低一次性重构风险。
+  日期/作者：2026-07-21 / Codex
+
+### 上下文与方向
+
+Remote Runtime 现有架构是：renderer 通过 Electrobun RPC 调 Desktop bun，Desktop bun 用 `RuntimeRouter` 根据 `runtimeId` 找到 local 或 remote `RuntimeClient`。local runtime 直接访问本地 managers；remote runtime 通过 HTTP `/rpc` 和 `/stream` 调 `apps/server`。因此任何能力只要仍绕过 `RuntimeRouter`，就不是完整 remote-aware。
+
+Milestone 7 的收口方向是分三层做：
+
+1. Renderer/UI 层：所有用户行为带上当前 tab 或 Settings 选择的 `runtimeId`。
+2. Desktop bun 层：所有 RPC handler 通过 `getRuntime(runtimeId)` 调 `RuntimeClient`，不直接调用本地 manager，除非该能力明确只属于本机 OS，例如 reveal in file manager。
+3. Server/runtime 层：server 暴露相同业务能力，使用 server 的 home/workspace/settings/traces，而不是 Desktop 本地 home。
+
+### 工作计划
+
+#### Milestone 7D：修复 MCP Settings runtimeId 丢失
+
+范围：只修 MCP Settings 页面保存路径，不改 MCP 协议。
+
+编辑：
+
+```text
+apps/desktop/src/components/settings/mcp-page.tsx
+apps/desktop/src/client/mcp.ts
+```
+
+实现：
+
+- `save()` 中新增/更新 server 时传入 `runtimeId`：
+  ```ts
+  creating || !selectedId
+    ? await addMcpServer(draft, runtimeId)
+    : await updateMcpServer(selectedId, draft, runtimeId)
+  ```
+- 检查 `addMcpServer`、`updateMcpServer` client 函数签名已支持 `runtimeId`；如已支持，只改调用点。
+
+验收：
+
+- 新增单测或轻量组件测试断言保存 MCP server 时 RPC payload 带 `runtimeId: "remote:test"`。
+- `rg -n "addMcpServer\(draft\)|updateMcpServer\(selectedId, draft\)" apps/desktop/src/components/settings/mcp-page.tsx` 无结果。
+
+#### Milestone 7E：HostServices list/read runtime 化
+
+范围：让 Thread Playground 内的导入/读取类操作也明确使用当前 runtime。
+
+编辑：
+
+```text
+packages/ui/src/host/types.ts
+apps/desktop/src/host/host-services.tsx
+packages/ui/src/components/thread-playground/thread-playground.tsx
+packages/ui/src/components/thread-playground/tool/mcp-tool-import-popover.tsx
+packages/ui/src/components/thread-playground/tool/built-in-tool-import-dialog.tsx
+packages/ui/src/components/thread-playground/variable/prompt-variable-skills.ts
+packages/ui/src/components/thread-playground/examples/prompts.ts
+```
+
+接口变更：
+
+```ts
+export interface RuntimeScopedHostOptions {
+  runtimeId?: string;
+}
+
+export interface SkillsHost {
+  getSettings(options?: RuntimeScopedHostOptions): Promise<SkillsSettings>;
+  listSkills(path: string, options?: RuntimeScopedHostOptions): Promise<SkillInfo[]>;
+}
+
+export interface McpHost {
+  listServers(options?: RuntimeScopedHostOptions): Promise<McpServerView[]>;
+  listTools(serverId: string, options?: RuntimeScopedHostOptions): Promise<McpServerToolsResponse>;
+}
+
+export interface BuiltinToolsHost {
+  list(options?: RuntimeScopedHostOptions): Promise<BuiltinTool[]>;
+  revealAbsolutePath(path: string): Promise<boolean>;
+  revealSkill(name: string): Promise<boolean>;
+}
+```
+
+UI 调用规则：
+
+- `ThreadPlaygroundContent` 已接收 `runtimeId`，必须继续向 tool import components 传递。
+- `mcp-tool-import-popover.tsx` 调用：
+  ```ts
+  mcp.listServers({ runtimeId })
+  mcp.listTools(serverId, { runtimeId })
+  ```
+- `built-in-tool-import-dialog.tsx` 调用：
+  ```ts
+  builtinTools.list({ runtimeId })
+  ```
+- `listEnabledPromptVariableSkills(skills, { runtimeId })`，函数签名同步增加 options。
+- `examples/prompts.ts` 如用于加载 skills，也同步传 options；如果调用点没有 runtimeId，则保持 undefined 作为 local/default 行为。
+
+Desktop HostServices 实现：
+
+```ts
+skills: {
+  getSettings: (options) => getSkillsSettings(options?.runtimeId as RuntimeId | undefined),
+  listSkills: (path, options) => listSkills(path, options?.runtimeId as RuntimeId | undefined),
+},
+mcp: {
+  listServers: (options) => listMcpServers(options?.runtimeId as RuntimeId | undefined),
+  listTools: (serverId, options) => listMcpTools(serverId, options?.runtimeId as RuntimeId | undefined),
+},
+builtinTools: {
+  list: (options) => listBuiltInTools(options?.runtimeId as RuntimeId | undefined),
+  revealAbsolutePath,
+  revealSkill,
+},
+```
+
+验收：
+
+- remote thread 的 Add MCP popover 调用 `mcpListServers` 时 payload 包含 remote runtimeId。
+- remote thread 的 Add built-in tool dialog 调用 `builtInListTools` 时 payload 包含 remote runtimeId。
+- remote thread 的 prompt-variable skills 加载调用 `skillsGetSettings` 和 `skillsListSkills` 时 payload 包含 remote runtimeId。
+- local thread 不传 runtimeId 或传 `local` 时行为保持不变。
+
+#### Milestone 7F：TraceManager runtime 化
+
+范围：解除 TraceManager 对 Desktop 本地 home 的硬编码，为 server 复用做准备。
+
+编辑/移动候选：
+
+```text
+apps/desktop/src/bun/traces/trace-manager.ts
+apps/desktop/src/bun/traces/langfuse-client.ts
+apps/desktop/src/bun/traces/index.ts
+packages/runtime/src/traces/trace-manager.ts       # 推荐目标
+packages/runtime/src/traces/langfuse-client.ts     # 推荐目标
+packages/runtime/src/traces/index.ts               # 推荐目标
+packages/runtime/src/index.ts
+```
+
+推荐实现路径：
+
+1. 先在原文件内把构造函数改为注入：
+   ```ts
+   export interface TraceManagerOptions {
+     homePath: string;
+   }
+
+   export class TraceManager {
+     private readonly _traceRoot: string;
+
+     constructor(options: TraceManagerOptions) {
+       this._traceRoot = path.join(options.homePath, "traces", "projects");
+       mkdirSync(this._traceRoot, { recursive: true });
+     }
+   }
+   ```
+2. 将所有使用 `TRACE_ROOT` 的方法改为使用 `this._traceRoot`。
+3. 修改 Desktop composition：
+   ```ts
+   const traceManager = new TraceManager({ homePath });
+   ```
+4. 如果 `trace-manager.ts` 仅依赖 Node/Bun 安全模块和 `@llm-space/core` 类型，则移动到 `packages/runtime/src/traces`；如果存在 Desktop-only 依赖，先保持在 Desktop，但新增 adapter，不强行移动。
+
+验收：
+
+- `rg -n "TRACE_ROOT|getLlmSpaceHomePath\(\)" apps/desktop/src/bun/traces packages/runtime/src/traces` 不再显示 trace root import-time 固定路径。
+- Desktop 本地 trace 行为不变：list/create/import/read/write workbench 测试通过。
+
+#### Milestone 7G：Remote trace RPC、server dispatch、Desktop route 接入
+
+范围：把 trace 能力纳入 runtime RPC。
+
+新增/修改类型：
+
+```text
+packages/runtime/src/remote-protocol.ts
+packages/runtime/src/runtime/types.ts
+apps/server/src/rpc.ts
+apps/server/src/runtime-composition.ts 或 apps/server/src/index.ts
+apps/desktop/src/bun/remote/remote-runtime-client.ts
+apps/desktop/src/bun/runtime/local-runtime-client.ts 或 packages/runtime local runtime 类型
+apps/desktop/src/bun/rpc/index.ts
+apps/desktop/src/shared/rpc.ts
+apps/desktop/src/client/traces.ts
+```
+
+Remote protocol 新增方法：
+
+```text
+trace.listProjects
+trace.createProject
+trace.createConnectedProject
+trace.listTraces
+trace.importLangfuseJson
+trace.searchLangfuseTraces
+trace.syncLangfuseTraces
+trace.readTrace
+trace.readOrCreateWorkbench
+trace.updateTraceTitle
+trace.writeWorkbench
+```
+
+`RuntimeClient` 增加 trace 方法，签名沿用 `apps/desktop/src/shared/traces.ts` 中类型：
+
+```ts
+traceListProjects(): Promise<TraceProject[]>;
+traceCreateProject(name: string): Promise<TraceProject>;
+traceCreateConnectedProject(input: TraceConnectedProjectInput): Promise<TraceProject>;
+traceListTraces(projectId: string): Promise<TraceRecord[]>;
+traceImportLangfuseJson(projectId: string, files: TraceImportFile[]): Promise<TraceImportResult>;
+traceSearchLangfuseTraces(input: { projectId: string; filters: TraceLangfuseSearchInput }): Promise<TraceRemoteTraceSummary[]>;
+traceSyncLangfuseTraces(input: { projectId: string; traceIds: string[] }): Promise<TraceSyncResult>;
+traceReadTrace(projectId: string, traceKey: string): Promise<TraceRecord>;
+traceReadOrCreateWorkbench(projectId: string, traceKey: string): Promise<TraceWorkbenchResponse>;
+traceUpdateTraceTitle(projectId: string, traceKey: string, title: string): Promise<TraceWorkbenchResponse>;
+traceWriteWorkbench(projectId: string, traceKey: string, thread: Thread): Promise<void>;
+```
+
+LocalRuntimeClient：
+
+- 接收 `traceManager` 依赖。
+- trace 方法转发给 `traceManager`。
+- Desktop RPC trace handlers 改为 `getRuntime(runtimeId).traceXxx(...)`，不再直接调用 `traceManager`。
+
+RemoteRuntimeClient：
+
+- 对每个 trace 方法调用 `/rpc`。
+- method 名称与 remote protocol 一致。
+
+Server：
+
+- server runtime composition 创建 server-home-scoped `TraceManager({ homePath })`。
+- `apps/server/src/rpc.ts` dispatch trace methods。
+- `/health.capabilities` 增加 trace 能力标识，或保持已有能力数组但确认 trace 可通过 protocol method 使用。
+
+类型边界：
+
+- `apps/desktop/src/shared/traces.ts` 当前只在 Desktop 下。为了 `apps/server` 与 `packages/runtime` 使用，应移动或复制到 `@llm-space/core` 或 `@llm-space/runtime`。
+- 推荐移动到 `packages/runtime/src/traces/types.ts`，再由 Desktop shared 文件 re-export，减少跨 app import。
+- 禁止让 `apps/server` import `apps/desktop/src/shared/traces.ts`，这是反向依赖。
+
+验收：
+
+- `apps/server` 可在自定义 `--home /tmp/llm-space-server-test` 下创建 trace project，文件落在 `/tmp/llm-space-server-test/traces/projects/...`。
+- Desktop 通过 remote runtime 调 `traceListProjects` 返回 server home 下的项目，不返回本地项目。
+- 不带 runtimeId 的旧 trace RPC 默认 local，保证本地 trace 面板兼容。
+
+#### Milestone 7H：Trace UI runtime 化
+
+范围：让 trace panel 和 trace tab 知道当前 runtime，并让 trace workbench 的 agent run/tool call 使用同一 runtime。
+
+编辑：
+
+```text
+apps/desktop/src/client/traces.ts
+apps/desktop/src/components/trace-panel/trace-panel.tsx
+apps/desktop/src/components/trace-panel/*
+apps/desktop/src/components/thread-tabs/use-thread-tabs.ts
+apps/desktop/src/components/thread-tabs/thread-tabs.tsx
+apps/desktop/src/components/thread-tabs/trace-tab-pane.tsx
+apps/desktop/src/app/page.tsx
+```
+
+设计：
+
+- `traceClient` 所有方法新增 `runtimeId?: RuntimeId`。
+- Trace panel 增加 runtime selector，默认使用 `getDefaultRuntime()`，或复用左侧 workspace runtime 选择。为了避免引入全局状态，第一版推荐在 Trace panel header 放一个小型 runtime selector。
+- trace tab 类型增加 `runtimeId`：
+  ```ts
+  interface TraceTab {
+    type: "trace";
+    projectId: string;
+    traceKey: string;
+    runtimeId: RuntimeId;
+  }
+  ```
+- trace tab id 改为包含 runtime：
+  ```ts
+  trace:${runtimeId}:${projectId}:${traceKey}
+  ```
+  避免 local 和 remote 中同名 project/trace key 互相覆盖。
+- `TraceTabPane` 调用 `traceClient.readOrCreateWorkbench(projectId, traceKey, runtimeId)`。
+- `TraceTabPane` 渲染 `ThreadPlayground` 时传：
+  ```tsx
+  transport={createRpcTransport(runtimeId)}
+  runtimeId={runtimeId}
+  ```
+- trace workbench 保存 `traceClient.writeWorkbench(projectId, traceKey, thread, runtimeId)`。
+- `onRenameTitle` 更新对应 runtime 的 trace 数据。
+
+验收：
+
+- local trace panel 和 remote trace panel 的 project 列表不同且互不覆盖。
+- 打开 remote trace workbench 后运行 agent，stream request payload 带 remote runtimeId。
+- remote trace workbench 中 manual tool call payload 带 remote runtimeId。
+- 关闭 remote runtime 时，对应 remote trace tabs 被关闭或显示明确断开错误，不 fallback local。
+
+#### Milestone 7I：验证与状态更新
+
+范围：完成自动测试、手动 smoke、ExecPlan 状态更新。
+
+必须运行：
+
+```sh
+bun run typecheck
+bun run lint
+bun run test
+git diff --check
+```
+
+如本仓库标准入口要求 mise，则补跑：
+
+```sh
+mise run typecheck
+mise run lint
+mise run test
+```
+
+新增/更新测试建议：
+
+```text
+apps/desktop/src/components/settings/mcp-page.test.tsx
+apps/desktop/src/client/tool-execution.test.ts
+apps/desktop/src/bun/remote/remote-runtime-client.test.ts
+apps/desktop/src/client/traces.test.ts
+apps/server/src/rpc.test.ts
+packages/runtime/src/traces/trace-manager.test.ts
+```
+
+测试重点：
+
+- MCP Settings add/update 带 runtimeId。
+- HostServices 的 MCP/built-in/skills list/read 方法会把 options.runtimeId 传到 client。
+- Thread Playground tool import 调 host method 时带当前 runtimeId。
+- RemoteRuntimeClient trace methods 生成正确 method 和 params。
+- Server trace RPC 调用 server-home-scoped TraceManager。
+- TraceManager 使用注入 homePath，不读取 Desktop 本地 home。
+- Trace tab id 包含 runtimeId。
+
+手动验收：
+
+```text
+1. 启动 remote server，连接 remote runtime。
+2. 同时打开 local thread 与 remote thread。
+3. 在 local thread 添加 built-in bash，执行 pwd，确认本地路径。
+4. 在 remote thread 添加 built-in bash，执行 pwd/uname -a，确认远端路径/Linux 信息。
+5. Settings runtime 选择 remote，新增 stdio MCP server，确认远端进程启动，local settings 未变化。
+6. Settings runtime 选择 remote，修改 Search/Network/Skills/Models，确认写入 remote home/settings。
+7. Trace panel 选择 remote，创建 project 并导入 Langfuse JSON，确认文件写入 remote home/traces。
+8. 打开 remote trace workbench，运行 agent 或 manual tool，确认 stream/tool payload 使用 remote runtimeId。
+9. 切回 local trace panel，确认看不到 remote-only trace project。
+```
+
+### 具体步骤
+
+所有命令在仓库根目录执行：
+
+```sh
+cd /data00/home/qiangenchao/ai_projects/llm-space
+```
+
+1. 记录执行前状态：
+
+```sh
+git status --short
+git rev-parse --abbrev-ref HEAD
+git rev-parse HEAD
+```
+
+预期：分支为 `feat/support-ssh-remote`；不得回滚用户已有 `.gitignore` 改动。
+
+2. 修 MCP Settings runtimeId：
+
+```sh
+rg -n "addMcpServer\(draft\)|updateMcpServer\(selectedId, draft\)" apps/desktop/src/components/settings/mcp-page.tsx
+```
+
+编辑后预期：上述命令无结果，或结果均已包含 `runtimeId`。
+
+3. 改 HostServices runtime-scoped options：
+
+```sh
+rg -n "interface SkillsHost|interface McpHost|interface BuiltinToolsHost" packages/ui/src/host/types.ts
+rg -n "mcp\.listServers\(|mcp\.listTools\(|builtinTools\.list\(|skills\.getSettings\(|skills\.listSkills\(" packages/ui/src
+```
+
+预期：调用点按 runtimeId 传递 options。
+
+4. 改 TraceManager 注入 homePath：
+
+```sh
+rg -n "TRACE_ROOT|getLlmSpaceHomePath\(\)" apps/desktop/src/bun/traces packages/runtime/src/traces 2>/dev/null || true
+```
+
+预期：不再存在 import-time 固定 trace root。
+
+5. 接入 trace RuntimeClient 和 remote protocol：
+
+```sh
+rg -n "trace\.listProjects|traceReadOrCreateWorkbench|traceWriteWorkbench" packages/runtime/src apps/server/src apps/desktop/src
+```
+
+预期：remote protocol、server dispatch、local runtime、remote runtime client、desktop RPC/client 都存在 trace routing。
+
+6. 改 trace UI runtimeId：
+
+```sh
+rg -n "traceKey.*runtimeId|trace:\$\{runtimeId\}|TraceTabPane.*runtimeId|traceClient\..*runtimeId" apps/desktop/src/components apps/desktop/src/client/traces.ts
+```
+
+预期：trace tab key、trace client、TraceTabPane 都显式包含 runtimeId。
+
+7. 跑验证：
+
+```sh
+bun run typecheck
+bun run lint
+bun run test
+git diff --check
+```
+
+预期：全部零错误，测试全部 PASS，0 skipped。
+
+### 验证与验收
+
+Milestone 7 完成的刚性验收条件：
+
+- [x] `bun run typecheck` 零错误。
+- [x] `bun run lint` 零错误；仅有 Node MODULE_TYPELESS_PACKAGE_JSON 运行时 warning，非 ESLint 规则告警。
+- [x] `bun run test` 全部 PASS：107 pass，0 fail，0 skipped。
+- [x] `git diff --check` 零输出。
+- [x] `rg -n "addMcpServer\(draft\)|updateMcpServer\(selectedId, draft\)" apps/desktop/src/components/settings/mcp-page.tsx` 无未传 runtimeId 的调用。
+- [x] `packages/ui/src/host/types.ts` 的 SkillsHost/McpHost/BuiltinToolsHost list/read 接口支持 `options?: { runtimeId?: string }`。
+- [x] Thread Playground 的 MCP import、built-in import、prompt-variable skills 加载都会传当前 `runtimeId`。
+- [x] trace RPC 不再只走本地 `TraceManager`；Desktop trace client 支持 runtimeId。
+- [x] remote trace project 创建后由 server runtime-scoped `TraceManager({ homePath })` 写入 remote server home 的 `traces/projects` 下；已通过类型与 RPC 路由验证，真实 SSH 手动验收待用户环境执行。
+- [x] remote trace workbench 的 `ThreadPlayground` run/tool call 使用同一个 remote runtimeId。
+- [x] local 和 remote 中相同 projectId/traceKey 的 trace tab 不互相覆盖，trace tab id 已包含 runtimeId。
+
+### 文档更新
+
+Milestone 7 本身不更新用户文档。原因：Remote Runtime 整体文档属于 Milestone 9，必须等 Milestone 8 打包/release 设计稳定后统一更新。
+
+但如果本轮移动 trace 类型或新增 runtime trace API，必须在代码注释中保持边界清晰：
+
+- trace files 属于 runtime home，不属于 workspace。
+- trace workbench 是可编辑 Thread copy，但其 owning runtime 必须与 trace project runtime 一致。
+- Desktop 本机 reveal/open path 仍是 local OS action，不应伪装成 remote reveal。
+
+### 幂等性与恢复
+
+- MCP Settings 修复可重复应用；若调用点已传 runtimeId，跳过。
+- HostServices options 是向后兼容变更；web host 可忽略 options。
+- TraceManager homePath 注入应保持本地默认行为一致；若移动到 `packages/runtime` 失败，可先保留 Desktop 文件并导出给 server 复用，但不得让 server 反向 import Desktop app 目录。
+- trace tab id 改为包含 runtimeId 后，旧恢复数据如没有 runtimeId，应默认 `local`，保证旧 tabs 可恢复。
+- 如果 remote trace RPC 实现过程中发现 Langfuse credential 存储需要额外 secret 加密设计，本里程碑先保持与本地 TraceManager 等价的明文/红acted preview 行为，不引入 Keychain；Keychain 属 Milestone 8/后续安全加固。
+
+### 产物与备注
+
+本节是 Phase 2 方案修订，尚未执行代码修改。执行前必须完成 Phase 3 Review。
+
+### 接口与依赖
+
+涉及接口：
+
+```ts
+// packages/ui/src/host/types.ts
+export interface RuntimeScopedHostOptions {
+  runtimeId?: string;
+}
+
+// packages/runtime/src/runtime/types.ts
+export interface RuntimeClient {
+  // existing methods...
+  traceListProjects(): Promise<TraceProject[]>;
+  traceCreateProject(name: string): Promise<TraceProject>;
+  traceReadOrCreateWorkbench(projectId: string, traceKey: string): Promise<TraceWorkbenchResponse>;
+  traceWriteWorkbench(projectId: string, traceKey: string, thread: Thread): Promise<void>;
+}
+
+// apps/desktop/src/client/traces.ts
+traceClient.listProjects(runtimeId?: RuntimeId): Promise<TraceProject[]>;
+traceClient.readOrCreateWorkbench(projectId: string, traceKey: string, runtimeId?: RuntimeId): Promise<TraceWorkbenchResponse>;
+```
+
+依赖约束：
+
+- 不新增 npm/pnpm/yarn；仓库使用 bun/mise。
+- `packages/ui` 不 import Desktop/Electrobun 类型。
+- `apps/server` 不 import `apps/desktop/src/*`。
+- 若移动 trace 类型，优先放入 `packages/runtime` 或 `packages/core`，保证 server 和 desktop 都能正向依赖。
+
+[2026-07-21 21:21:32+08:00] 修改说明：追加 Milestone 7 完整收口 ExecPlan，覆盖 MCP Settings runtimeId 漏传、HostServices list/read runtime 化、TraceManager home 注入、remote trace RPC、trace UI runtime 化和验收方案。理由：用户明确要求细化 Milestone 7 所有未完成部分，并进入设计执行；按照 harness-exec-plan 纪律，必须先完成 Phase 2 方案并等待 Review，不能在确认前直接改代码。
+
+
+[2026-07-21 21:42:20+08:00] 修改说明：完成 Milestone 7D-7I 实现并更新验收结果。代码层完成 MCP Settings runtimeId 修复、HostServices runtime-scoped options、TraceManager 迁入 runtime 并 homePath 注入、remote trace RPC/server dispatch/Desktop routing、trace panel/tab/workbench runtime 化。验证结果：`bun run typecheck` 通过；`bun run lint` 通过（仅 Node module type warning）；`bun run test` 107 pass / 0 fail / 0 skipped；`git diff --check` 零输出。理由：用户确认 trace 纳入 Milestone 7 后进入开发执行，按 ExecPlan 纪律同步更新进度与验证证据。

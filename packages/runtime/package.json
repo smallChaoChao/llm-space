@@ -16,7 +16,8 @@
     "./tools": "./src/tools/index.ts",
     "./tools/built-in": "./src/tools/built-in/index.ts",
     "./package.json": "./package.json",
-    "./remote-protocol": "./src/remote-protocol.ts"
+    "./remote-protocol": "./src/remote-protocol.ts",
+    "./traces": "./src/traces/index.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "catalog:",
