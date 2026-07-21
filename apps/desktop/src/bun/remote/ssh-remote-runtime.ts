@@ -3,10 +3,18 @@ import { randomBytes } from "node:crypto";
 import { REMOTE_RUNTIME_PROTOCOL_VERSION } from "@llm-space/runtime/remote-protocol";
 
 import { findFreePort } from "./port";
-import { spawnManagedProcess, type ManagedProcess } from "./process-utils";
+import {
+  spawnManagedProcess,
+  waitForProcess,
+  type ManagedProcess,
+} from "./process-utils";
 import { RemoteRuntimeClient } from "./remote-runtime-client";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
-import { buildRemoteServerArgs, buildTunnelArgs } from "./ssh-command";
+import {
+  buildRemoteCleanupArgs,
+  buildRemoteServerArgs,
+  buildTunnelArgs,
+} from "./ssh-command";
 
 export interface SshRemoteRuntimeHandle {
   client: RemoteRuntimeClient;
@@ -21,6 +29,8 @@ export async function startSshRemoteRuntime(
   const processes: ManagedProcess[] = [];
 
   try {
+    await _cleanupRemoteServer(config);
+
     const serverProcess = spawnManagedProcess(
       "remote server",
       "ssh",
@@ -50,12 +60,25 @@ export async function startSshRemoteRuntime(
       stop: async () => {
         client.shutdown();
         await Promise.all(processes.map((process) => process.stop()));
+        await _cleanupRemoteServer(config);
       },
     };
   } catch (error) {
     await Promise.all(processes.map((process) => process.stop()));
+    await _cleanupRemoteServer(config);
     throw error;
   }
+}
+
+async function _cleanupRemoteServer(
+  config: SshRemoteRuntimeConfig
+): Promise<void> {
+  const cleanup = spawnManagedProcess(
+    "remote cleanup",
+    "ssh",
+    buildRemoteCleanupArgs(config)
+  );
+  await waitForProcess(cleanup.child, 5_000);
 }
 
 function _generateToken(): string {

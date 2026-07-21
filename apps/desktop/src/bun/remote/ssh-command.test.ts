@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import {
+  buildRemoteCleanupCommand,
   buildRemoteServerCommand,
   buildSshBaseArgs,
   buildSshTarget,
@@ -64,5 +65,12 @@ describe("ssh command builders", () => {
     expect(command).toContain("cd '/repo path/llm-space'");
     expect(command).toContain("--token 'tok'\\''en$;'");
     expect(command).toContain("--home '/tmp/home path'");
+    expect(command).toContain("exec bun --filter @llm-space/server dev --");
+  });
+
+  test("builds cleanup command scoped to server port", () => {
+    expect(buildRemoteCleanupCommand({ remoteServerPort: 39123 })).toContain(
+      "--port 39123"
+    );
   });
 });
