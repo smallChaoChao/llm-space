@@ -39,12 +39,14 @@ interface FormState {
   port: string;
   identityFile: string;
   remoteRepo: string;
+  remoteInstallDir: string;
   remoteHome: string;
   remoteServerPort: string;
   localPort: string;
 }
 
 const DEFAULT_REMOTE_HOME = "/tmp/llm-space-server-ui-test";
+const DEFAULT_REMOTE_INSTALL_DIR = "~/.llm-space/remote-runtime";
 
 function _emptyForm(): FormState {
   return {
@@ -54,6 +56,7 @@ function _emptyForm(): FormState {
     port: "22",
     identityFile: "",
     remoteRepo: "",
+    remoteInstallDir: DEFAULT_REMOTE_INSTALL_DIR,
     remoteHome: DEFAULT_REMOTE_HOME,
     remoteServerPort: "39123",
     localPort: "",
@@ -296,7 +299,8 @@ function RemoteServerDetails({
       <div className="grid gap-2 rounded-lg border p-3 text-sm">
         <Info label="Status" value={server.status} />
         <Info label="Runtime" value={server.runtimeId} />
-        <Info label="Remote repo" value={server.remoteRepo} />
+        <Info label="Install dir" value={server.remoteInstallDir} />
+        <Info label="Remote repo" value={server.remoteRepo ?? "Legacy only"} />
         <Info label="Remote home" value={server.remoteHome} />
         <Info label="Server port" value={String(server.remoteServerPort)} />
         <Info
@@ -350,10 +354,6 @@ function RemoteServerForm({
   onSave: () => void;
   onCancel: () => void;
 }) {
-  const withDefaults = (next: FormState): FormState => {
-    const remoteRepo = next.remoteRepo || _defaultRepo(next.user);
-    return { ...next, remoteRepo };
-  };
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       <div>
@@ -378,7 +378,7 @@ function RemoteServerForm({
         <Field
           label="User"
           value={form.user}
-          onChange={(user) => onChange(withDefaults({ ...form, user }))}
+          onChange={(user) => onChange({ ...form, user })}
         />
       </div>
       <details className="rounded-lg border p-3">
@@ -397,7 +397,14 @@ function RemoteServerForm({
             onChange={(identityFile) => onChange({ ...form, identityFile })}
           />
           <Field
-            label="Remote repo"
+            label="Install directory"
+            value={form.remoteInstallDir}
+            onChange={(remoteInstallDir) =>
+              onChange({ ...form, remoteInstallDir })
+            }
+          />
+          <Field
+            label="Remote repo (legacy source mode)"
             value={form.remoteRepo}
             onChange={(remoteRepo) => onChange({ ...form, remoteRepo })}
           />
@@ -467,7 +474,8 @@ function _draft(form: FormState): RemoteServerDraft {
     user: form.user || undefined,
     port: _number(form.port),
     identityFile: form.identityFile || undefined,
-    remoteRepo: form.remoteRepo || _defaultRepo(form.user),
+    remoteRepo: form.remoteRepo || undefined,
+    remoteInstallDir: form.remoteInstallDir || undefined,
     remoteHome: form.remoteHome || undefined,
     remoteServerPort: _number(form.remoteServerPort),
     localPort: form.localPort ? _number(form.localPort) : undefined,
@@ -482,7 +490,8 @@ function _form(server: RemoteServerView): FormState {
     user: server.user ?? "",
     port: String(server.port),
     identityFile: server.identityFile ?? "",
-    remoteRepo: server.remoteRepo,
+    remoteRepo: server.remoteRepo ?? "",
+    remoteInstallDir: server.remoteInstallDir,
     remoteHome: server.remoteHome,
     remoteServerPort: String(server.remoteServerPort),
     localPort: server.localPort ? String(server.localPort) : "",
@@ -495,8 +504,4 @@ function _number(value: string): number | undefined {
   const parsed = Number(trimmed);
   if (!Number.isInteger(parsed)) throw new Error(`Invalid number: ${value}`);
   return parsed;
-}
-
-function _defaultRepo(user: string): string {
-  return user ? `/data00/home/${user}/ai_projects/llm-space` : "~/llm-space";
 }

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import {
   buildRemoteServerCommand,
+  buildSourceRemoteServerCommand,
   buildSshBaseArgs,
   buildSshTarget,
   buildTunnelArgs,
@@ -18,6 +19,7 @@ const CONFIG: SshRemoteRuntimeConfig = {
   identityFile: "/key file",
   extraArgs: ["-J", "jump"],
   remoteRepo: "/repo path/llm-space",
+  remoteInstallDir: "/opt/llm-space/runtime",
   remoteHome: "/tmp/home path",
   remoteServerPort: 39123,
   makeDefault: true,
@@ -55,14 +57,28 @@ describe("ssh command builders", () => {
   test("shell quotes remote server command", () => {
     expect(shellQuote("a'b$c")).toBe("'a'\\''b$c'");
     const command = buildRemoteServerCommand({
-      remoteRepo: "/repo path/llm-space",
+      entrypoint: "/opt/llm space/server/bin/llm-space-server",
       host: "127.0.0.1",
       port: 39123,
       token: "tok'en$;",
       home: "/tmp/home path",
     });
-    expect(command).toContain("cd '/repo path/llm-space'");
+    expect(command).toContain(
+      "exec '/opt/llm space/server/bin/llm-space-server'"
+    );
     expect(command).toContain("--token 'tok'\\''en$;'");
     expect(command).toContain("--home '/tmp/home path'");
+  });
+
+  test("keeps source mode as legacy fallback", () => {
+    const command = buildSourceRemoteServerCommand({
+      remoteRepo: "/repo path/llm-space",
+      host: "127.0.0.1",
+      port: 39123,
+      token: "token",
+      home: "/tmp/home path",
+    });
+    expect(command).toContain("cd '/repo path/llm-space'");
+    expect(command).toContain("exec bun --filter @llm-space/server dev --");
   });
 });

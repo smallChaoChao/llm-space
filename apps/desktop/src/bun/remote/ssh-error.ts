@@ -1,7 +1,11 @@
 export type SshBootstrapStage =
+  | "platform-detect"
+  | "server-install"
+  | "server-upgrade"
   | "server-start"
   | "tunnel-start"
-  | "health-check";
+  | "health-check"
+  | "version-check";
 
 export interface SshBootstrapFailureInput {
   stage: SshBootstrapStage;

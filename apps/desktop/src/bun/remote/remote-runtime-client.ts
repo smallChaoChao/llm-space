@@ -44,6 +44,11 @@ import type {
   TraceWorkbenchResponse,
 } from "@llm-space/runtime/traces";
 
+import {
+  currentDesktopVersion,
+  REQUIRED_REMOTE_CAPABILITIES,
+} from "./server-package";
+
 export interface RemoteRuntimeClientOptions {
   id: RuntimeId;
   name: string;
@@ -65,7 +70,20 @@ export class RemoteRuntimeClient implements RuntimeClient {
     const protocolVersion = Number(health.protocolVersion);
     if (protocolVersion !== REMOTE_RUNTIME_PROTOCOL_VERSION) {
       throw new Error(
-        `Remote runtime protocol mismatch: expected ${REMOTE_RUNTIME_PROTOCOL_VERSION}, got ${protocolVersion}.`
+        `Remote runtime protocol mismatch: Desktop requires protocol ${REMOTE_RUNTIME_PROTOCOL_VERSION}, server provides ${protocolVersion}. Upgrade the remote server.`
+      );
+    }
+    if (health.version !== currentDesktopVersion()) {
+      throw new Error(
+        `Remote runtime version mismatch: Desktop requires ${currentDesktopVersion()}, server provides ${health.version}. Upgrade the remote server.`
+      );
+    }
+    const missingCapabilities = REQUIRED_REMOTE_CAPABILITIES.filter(
+      (capability) => !health.capabilities.includes(capability)
+    );
+    if (missingCapabilities.length) {
+      throw new Error(
+        `Remote runtime is missing required capabilities: ${missingCapabilities.join(", ")}.`
       );
     }
     this._health = health;

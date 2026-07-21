@@ -12,6 +12,7 @@ export interface SshRemoteRuntimeConfig {
   identityFile?: string;
   extraArgs: string[];
   remoteRepo: string;
+  remoteInstallDir: string;
   remoteHome: string;
   remoteServerPort: number;
   localPort?: number;
@@ -34,12 +35,7 @@ export function readSshRemoteRuntimeConfig(
       "LLM_SPACE_REMOTE_SSH_HOST is required when SSH remote runtime is enabled."
     );
   }
-  const remoteRepo = env.LLM_SPACE_REMOTE_REPO?.trim();
-  if (!remoteRepo) {
-    throw new Error(
-      "LLM_SPACE_REMOTE_REPO is required when SSH remote runtime is enabled."
-    );
-  }
+  const remoteRepo = env.LLM_SPACE_REMOTE_REPO?.trim() || "";
 
   const id = (env.LLM_SPACE_REMOTE_RUNTIME_ID?.trim() ||
     "remote:ssh-manual") as RuntimeId;
@@ -61,6 +57,8 @@ export function readSshRemoteRuntimeConfig(
     identityFile: _optionalPath(env.LLM_SPACE_REMOTE_SSH_IDENTITY_FILE),
     extraArgs: _splitExtraArgs(env.LLM_SPACE_REMOTE_SSH_EXTRA_ARGS),
     remoteRepo,
+    remoteInstallDir:
+      env.LLM_SPACE_REMOTE_INSTALL_DIR?.trim() || "~/.llm-space/remote-runtime",
     remoteHome: env.LLM_SPACE_REMOTE_HOME?.trim() || "~/.llm-space-server",
     remoteServerPort: _parsePort(
       env.LLM_SPACE_REMOTE_SERVER_PORT,

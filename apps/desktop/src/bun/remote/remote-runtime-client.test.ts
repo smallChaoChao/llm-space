@@ -1,13 +1,26 @@
 import type { AgentEvent, AgentStreamRequest } from "@llm-space/core";
+import type { RuntimeCapability } from "@llm-space/runtime/runtime";
 import { describe, expect, test } from "bun:test";
 
 import { RemoteRuntimeClient } from "./remote-runtime-client";
+
+const CAPABILITIES: RuntimeCapability[] = [
+  "streamThread",
+  "filesystem",
+  "models",
+  "mcp",
+  "builtinTools",
+  "skills",
+  "search",
+  "network",
+  "traces",
+];
 
 const HEALTH_BODY = {
   ok: true,
   version: "4.2.0",
   protocolVersion: 1,
-  capabilities: ["filesystem"],
+  capabilities: CAPABILITIES,
   homePath: "/tmp/remote",
   workspacePath: "/tmp/remote/workspace",
   platform: { os: "linux", arch: "x64" },
@@ -34,7 +47,7 @@ describe("RemoteRuntimeClient", () => {
           kind: "remote",
           name: "Test Remote",
           status: "connected",
-          capabilities: ["filesystem"],
+          capabilities: HEALTH_BODY.capabilities,
         });
       }
     );
@@ -111,6 +124,21 @@ describe("RemoteRuntimeClient", () => {
         expect(rejection).toBeInstanceOf(Error);
         expect((rejection as Error).message).toBe("Remote failed");
       }
+    );
+  });
+
+  test("rejects incompatible protocol, version, and capabilities", async () => {
+    await _expectConnectError(
+      { ...HEALTH_BODY, protocolVersion: 999 },
+      "Remote runtime protocol mismatch"
+    );
+    await _expectConnectError(
+      { ...HEALTH_BODY, version: "0.0.1" },
+      "Remote runtime version mismatch"
+    );
+    await _expectConnectError(
+      { ...HEALTH_BODY, capabilities: ["filesystem"] },
+      "missing required capabilities"
     );
   });
 
@@ -218,4 +246,29 @@ async function _withFetch(
   } finally {
     globalThis.fetch = original;
   }
+}
+
+async function _expectConnectError(
+  health: unknown,
+  message: string
+): Promise<void> {
+  await _withFetch(
+    () => Response.json(health),
+    async () => {
+      const client = new RemoteRuntimeClient({
+        id: "remote:test",
+        name: "Test Remote",
+        baseUrl: "http://remote.test/",
+        token: "secret",
+      });
+      let rejection: unknown;
+      try {
+        await client.connect();
+      } catch (error) {
+        rejection = error;
+      }
+      expect(rejection).toBeInstanceOf(Error);
+      expect((rejection as Error).message).toContain(message);
+    }
+  );
 }

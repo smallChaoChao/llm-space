@@ -15,10 +15,9 @@ import type {
   RemoteServerView,
 } from "../../shared/remote-servers";
 
+import { DEFAULT_REMOTE_INSTALL_DIR } from "./server-package";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
-import {
-  startSshRemoteRuntime,
-} from "./ssh-remote-runtime";
+import { startSshRemoteRuntime } from "./ssh-remote-runtime";
 
 interface RemoteRuntimeHandle {
   client: RuntimeClient;
@@ -204,7 +203,8 @@ export class RemoteServerManager {
       port: server.port,
       identityFile: server.identityFile,
       extraArgs: [],
-      remoteRepo: server.remoteRepo,
+      remoteRepo: server.remoteRepo ?? "",
+      remoteInstallDir: server.remoteInstallDir,
       remoteHome: server.remoteHome,
       remoteServerPort: server.remoteServerPort,
       localPort: server.localPort,
@@ -236,11 +236,11 @@ export class RemoteServerManager {
   ): RemoteServerConfig {
     const name = draft.name.trim();
     const host = draft.host.trim();
-    const remoteRepo = draft.remoteRepo.trim();
+    const remoteRepo = _optional(draft.remoteRepo);
+    const remoteInstallDir =
+      _optional(draft.remoteInstallDir) ?? DEFAULT_REMOTE_INSTALL_DIR;
     if (!name) throw new Error("Remote server name is required.");
     if (!host) throw new Error("Remote server host is required.");
-    if (!remoteRepo)
-      throw new Error("Remote server repository path is required.");
     return {
       id: meta.id,
       kind: "ssh",
@@ -250,6 +250,7 @@ export class RemoteServerManager {
       port: _port(draft.port, 22, "SSH port"),
       identityFile: _optional(draft.identityFile),
       remoteRepo,
+      remoteInstallDir,
       remoteHome: _optional(draft.remoteHome) ?? "~/.llm-space-server",
       remoteServerPort: _port(
         draft.remoteServerPort,

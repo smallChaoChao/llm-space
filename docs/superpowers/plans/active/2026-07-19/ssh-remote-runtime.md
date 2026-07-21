@@ -41,7 +41,7 @@
 - [x] (2026-07-20 18:15:00+08:00) Milestone 5: 新增 SSH bootstrap、server 安装、启动、tunnel 管理（环境变量驱动，要求远端已有源码和依赖；真实 SSH 人工验收待用户环境执行）
 - [ ] (2026-07-19 10:49:54+08:00) Milestone 6: Runtime-aware UI 与设置页，支持远程服务器管理和 workspace 绑定
 - [ ] (2026-07-19 10:49:54+08:00) Milestone 7: 补齐 MCP、built-in tools、skills、search、network、trace 的远程能力
-- [ ] (2026-07-19 10:49:54+08:00) Milestone 8: 打包、release CI、server 版本兼容和自动升级
+- [x] (2026-07-21 22:08:00+08:00) Milestone 8: 打包、release CI、server 版本兼容和自动升级
 - [ ] (2026-07-19 10:49:54+08:00) Milestone 9: 文档更新、用户指南和故障排查
 - [ ] (2026-07-19 10:49:54+08:00) Phase 4.5: 独立代码审计
 - [ ] (2026-07-19 10:49:54+08:00) Phase 5: 结果汇报
@@ -3685,6 +3685,7 @@ sha: 95361996429c94c0632811fe0ecf06de48409c77
 - [x] (2026-07-21 21:38:00+08:00) Milestone 7G：Remote trace RPC、server dispatch、Desktop client/runtime 路由接入。
 - [x] (2026-07-21 21:40:00+08:00) Milestone 7H：Trace UI runtime 化，remote trace panel 与 trace workbench 不串 runtime。
 - [x] (2026-07-21 21:42:20+08:00) Milestone 7I：自动化验证、手动验收脚本和计划状态更新。
+- [x] (2026-07-21 21:48:19+08:00) Phase 2 修订：完成 Milestone 8 打包、release CI、server 版本兼容和自动升级细化方案，等待用户 Review。
 
 ### 意外发现
 
@@ -4202,7 +4203,518 @@ traceClient.readOrCreateWorkbench(projectId: string, traceKey: string, runtimeId
 - `apps/server` 不 import `apps/desktop/src/*`。
 - 若移动 trace 类型，优先放入 `packages/runtime` 或 `packages/core`，保证 server 和 desktop 都能正向依赖。
 
+
+## Milestone 8 完整 ExecPlan：server 打包、release CI、版本兼容与自动升级
+
+本节细化 Milestone 8。目标是把当前“远端已有源码仓库 + 通过 `bun --filter @llm-space/server dev` 启动”的开发态 SSH Remote Runtime，升级为可随正式 release 分发的产品态 server 包。完成后，用户在 Desktop 设置页连接 SSH server 时，不需要远端提前 clone 仓库、安装源码依赖或知道 `bun --filter` 命令；Desktop 会检测远端平台、选择匹配的 server 包、安装到远端版本化目录、启动该版本的 server，并在协议不兼容时拒绝连接而不是错误地降级到 local。
+
+本节是 Phase 2 方案修订。用户确认前不得开始代码修改。
+
+### 目标与全局视角
+
+Milestone 8 完成后新增三个用户可观察能力：
+
+第一，release 产物包含 headless server 包。每次 `v*` tag release 除 macOS Desktop DMG 和 update feed 外，还会在 versioned GitHub Release 上传 Linux server tarball。最小刚性目标是 `linux-x64` 与 `linux-arm64` 两个包，命名为 `llm-space-server-<version>-linux-x64.tar.gz` 和 `llm-space-server-<version>-linux-arm64.tar.gz`。
+
+第二，Desktop 连接 SSH remote 时可以安装或升级 server。远端不再要求存在源码仓库；只要求有 POSIX shell、SSH、可写安装目录，以及能运行目标平台的 server 包。安装与升级必须保留远端 `settings/`、`workspace/`、`traces/` 等 runtime 数据，因为这些数据属于 server home，不属于 server binary。
+
+第三，Desktop 与 server 有明确版本/协议兼容规则。Desktop 连接 server 时必须读取 `/health`，校验 `protocolVersion`、server `version` 和远端 `platform`。协议不兼容直接拒绝使用，并给出可操作错误；版本缺失或平台不匹配不能 silent fallback 到 local。
+
+### 上下文与方向
+
+当前仓库状态如下，后续执行者不能假设知道前序 Milestone：
+
+- `apps/server` 已存在，包名为 `@llm-space/server`，当前 `package.json` 只有 `dev`、`start`、`typecheck` 脚本，启动入口是 `apps/server/src/index.ts`。
+- server 当前通过 `bun src/index.ts --host 127.0.0.1 --port 39123 --token <token> --home ~/.llm-space-server` 运行。`--token` 必填，`--home` 默认 `~/.llm-space-server`。
+- `apps/server/src/http-server.ts` 的 `/health` 已返回 `version`、`protocolVersion`、`capabilities`、`homePath`、`workspacePath` 和 `platform`。
+- 共享协议位于 `packages/runtime/src/remote-protocol.ts`，当前 `REMOTE_RUNTIME_PROTOCOL_VERSION = 1`。
+- Desktop remote client 位于 `apps/desktop/src/bun/remote/remote-runtime-client.ts`，当前只校验 `protocolVersion` 等于 `REMOTE_RUNTIME_PROTOCOL_VERSION`。
+- SSH bootstrap 当前位于 `apps/desktop/src/bun/remote/ssh-remote-runtime.ts` 和 `ssh-command.ts`，仍通过 `cd <remoteRepo> && exec bun --filter @llm-space/server dev -- ...` 启动远端源码。
+- Remote server 配置当前仍包含 `remoteRepo`，因为 Milestone 5/6 依赖远端源码路径。Milestone 8 必须兼容旧配置，但新路径应把 `remoteRepo` 降级为 legacy fallback，而不是继续作为产品态必填核心。
+- release workflow 位于 `.github/workflows/release.yml`。当前 macOS Desktop build matrix 产出 regular/performance 两个 edition 的 DMG、tar.zst、patch、update.json，并发布到 rolling update release 和 versioned release。
+- `mise.toml` 是用户入口。当前有 `pack`、`pack:perf`、`pack:adhoc`、`pack:signed`，没有 `pack:server`。
+- 根 `package.json` 当前没有 `build:server` / `pack:server` 脚本，`typecheck` 已覆盖 `apps/server/tsconfig.json`。
+
+Milestone 8 的方向是：server 分发物必须是单独的 headless runtime 包，不复用 Electrobun Desktop 包；server binary/code 版本化安装，runtime data 独立保留；Desktop 的 SSH bootstrap 从“远端源码启动”迁移到“远端 release 包启动”，源码启动只作为开发 fallback。
+
+### 决策日志
+
+- 决策：server 安装目录采用版本化布局：`<remoteInstallDir>/versions/<version>/` 存放解包后的 server 程序，`<remoteInstallDir>/current` 指向当前版本；runtime data 继续使用 `remoteHome`，默认 `~/.llm-space-server`。
+  理由：binary 与 data 分离可以保证自动升级保留数据；版本化目录支持幂等安装、原子切换、失败回滚和后续多版本共存。若把 binary 解包到 `remoteHome`，升级时很容易误删用户数据。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：server 包第一版面向 Linux x64/arm64；不在 Milestone 8 承诺 Windows remote、Docker image、systemd service 或公网 daemon。
+  理由：当前需求是 SSH 到 Linux 服务器运行 runtime。扩大到 Windows/systemd/Docker 会引入权限、服务管理、网络暴露和安全模型，超过本里程碑的发布工程边界。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：`protocolVersion` 是硬兼容边界，必须完全相等；`version` 是分发与自动升级边界，默认要求 server version 与 Desktop app version 相同。
+  理由：Runtime RPC 是强类型业务协议，协议号不等时继续使用会造成数据写错 runtime 或工具调用语义错配。版本相同可降低“新 Desktop + 旧 server”遗漏能力的调试成本；将来可新增兼容区间，但第一版不做复杂协商。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：server 包下载源第一版复用 GitHub versioned release，而不是新增单独 update feed。
+  理由：Desktop 自动更新仍归 Electrobun update feed；server 是远端按需安装的附属 runtime，适合按 Desktop 当前版本精确下载 release asset。单独 server feed 会引入通道状态和回滚策略，当前不必要。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：远端安装优先使用本地 Desktop 已知的 release asset URL 下载到远端；如果远端无法访问 GitHub，后续可加“本地下载后 scp 上传”fallback，但 Milestone 8 的 MVP 只要求一种路径端到端可用。
+  理由：远端直连下载实现更简单、传输更少、日志更清晰；企业网络下 GitHub 访问可能失败，但这属于增强路径，不能阻塞核心版本化安装设计。
+  日期/作者：2026-07-21 / Codex
+
+- 决策：`remoteRepo` 保留为 legacy dev fallback，但新建 Remote Server 配置应新增 `remoteInstallDir`，默认 `~/.llm-space/remote-runtime`。产品态 connect 使用 `remoteInstallDir`，只有显式开发配置才走 `remoteRepo`。
+  理由：直接删除 `remoteRepo` 会破坏已有 Milestone 5/6 测试和用户当前配置；继续要求 `remoteRepo` 又会让产品态无法摆脱源码依赖。兼容保留、入口降级是成本最低路径。
+  日期/作者：2026-07-21 / Codex
+
+### 工作计划
+
+Milestone 8 分为 8A 到 8F 六个子里程碑。顺序必须保持：先定义包结构和本地打包命令，再接 CI，再做远端安装，再接入 Desktop 连接流程，最后补验证和文档计划。不要先改 SSH connect 逻辑；否则没有稳定包结构时，远端安装会反复返工。
+
+#### Milestone 8A：定义 server 包结构与本地 `pack:server`
+
+范围：新增 server 打包脚本、mise 入口和本地 tarball 产物。server 包必须包含可运行入口、必要源码/依赖/manifest，以及一个机器可读的 metadata 文件。
+
+建议新增文件：
+
+- `apps/server/scripts/pack-server.ts`：负责生成 server 包。
+- `apps/server/scripts/server-package-manifest.ts` 或 `packages/runtime/src/remote-package.ts`：定义 manifest 类型，供打包、Desktop installer 和测试复用。
+- `apps/server/dist/` 或 `apps/server/artifacts/`：本地生成目录，建议 artifact 统一放 `apps/server/artifacts/`，避免和 Desktop `apps/desktop/artifacts/` 混用。
+
+server tarball 根目录建议是：
+
+```text
+llm-space-server-<version>-<os>-<arch>/
+  package.json
+  bun.lock
+  apps/server/package.json
+  apps/server/src/...
+  packages/core/src/...
+  packages/runtime/src/...
+  node_modules/...     # 如果选择依赖随包；否则 manifest 必须声明需要远端 bun install
+  server-manifest.json
+  bin/llm-space-server
+```
+
+优先方案是“包内包含运行所需依赖”，即远端不需要 `bun install`。如果 Bun 对 workspace 依赖打包限制导致体积或解析复杂，允许第一版用 `bun build --compile` 生成单文件可执行程序，但必须先验证 `@llm-space/core/server`、MCP、动态 import、native optional deps 不被破坏。不要假设 Bun compile 一定可行；必须以 `./llm-space-server --help` 和 `/health` smoke test 作为判断标准。
+
+manifest 最小字段：
+
+```ts
+export interface ServerPackageManifest {
+  name: "llm-space-server";
+  version: string;
+  protocolVersion: number;
+  os: "linux";
+  arch: "x64" | "arm64";
+  createdAt: string;
+  entrypoint: string;
+  sha256?: string;
+}
+```
+
+需要新增命令：
+
+```sh
+# package.json
+bun --filter @llm-space/server pack
+bun run pack:server
+
+# mise.toml
+mise run pack:server
+```
+
+验收：
+
+- `mise tasks ls` 能看到 `pack:server`。
+- `mise run pack:server` 在当前平台生成一个 `apps/server/artifacts/llm-space-server-4.2.0-<os>-<arch>.tar.gz`。如果当前平台不是 Linux，也允许生成当前平台开发包，但 release CI 仍必须生成 Linux 包。
+- 解包后运行入口的 `--help` 输出包含 `Usage: llm-space-server --token <token>`。
+- 本地 smoke test 可启动解包后的 server，带 token 请求 `/health` 返回 HTTP 200，body 中 `version` 等于 `apps/server/package.json` 版本，`protocolVersion` 等于 `REMOTE_RUNTIME_PROTOCOL_VERSION`。
+- `mise run pack` 仍只写 `apps/desktop/artifacts/`，不会写 `apps/server/artifacts/`。
+
+#### Milestone 8B：Release CI 产出并上传 Linux server 包
+
+范围：修改 `.github/workflows/release.yml`，在 tag release 中新增 server build job，并把 server tarball 上传到 versioned release。不要上传到 Desktop rolling update feed。
+
+建议 CI 结构：
+
+- `meta` job 继续校验 tag 与 `apps/desktop/package.json` version 一致；同时新增校验 `apps/server/package.json` version 也等于 tag version。
+- 新增 `build-server` job，运行在 `ubuntu-latest`，matrix 为 `linux-x64` 与 `linux-arm64`。
+- 如果 GitHub hosted x64 runner 无法原生构建 arm64 包，优先让 `pack-server.ts` 支持 `--target linux-arm64` 生成 architecture-labeled 包；若包内包含 native arch 依赖，则必须使用可验证的 cross-build/compile 或改为只包含源码+依赖解析策略。不能产出假 arm64 包。
+- `build-server` 上传 artifact 名称建议为 `server-artifacts-linux-x64` / `server-artifacts-linux-arm64`。
+- `publish` job 下载 server artifacts，并在 versioned release `gh release upload` 中追加 `artifacts/server/*.tar.gz`。
+
+验收：
+
+- `.github/workflows/ci.yml` 的 YAML validation 仍通过。
+- `release.yml` 中 versioned release 上传包含 Desktop DMG 和 server tarball；rolling `updates` / `updates-performance` release 仍只包含 Electrobun updater 文件。
+- tag 为 `v4.2.0` 时，versioned release assets 至少包含：
+  - `LLMSpace-v4.2.0-macos-arm64.dmg`
+  - `LLMSpace-v4.2.0-macos-x64.dmg`
+  - `LLMSpace-performance-v4.2.0-macos-arm64.dmg`
+  - `LLMSpace-performance-v4.2.0-macos-x64.dmg`
+  - `llm-space-server-4.2.0-linux-x64.tar.gz`
+  - `llm-space-server-4.2.0-linux-arm64.tar.gz`
+- `meta` job 在 `apps/server/package.json` version 与 tag 不一致时失败，错误信息明确指出 server version mismatch。
+
+#### Milestone 8C：远端平台检测、包选择与安装器
+
+范围：新增 Desktop bun 侧 remote server installer。它负责通过 SSH 在远端执行平台检测、检查已安装版本、下载/解包目标 server 包、切换 `current`，并返回可启动入口路径。
+
+建议新增文件：
+
+- `apps/desktop/src/bun/remote/server-package.ts`：server asset 命名、平台映射、manifest 类型。
+- `apps/desktop/src/bun/remote/remote-platform.ts`：远端 `uname -s` / `uname -m` 解析为 `linux-x64` 或 `linux-arm64`。
+- `apps/desktop/src/bun/remote/remote-server-installer.ts`：安装/升级编排。
+- `apps/desktop/src/bun/remote/remote-server-installer.test.ts`：命令构造与幂等逻辑测试。
+
+远端目录布局：
+
+```text
+<remoteInstallDir>/
+  versions/
+    4.2.0/
+      server-manifest.json
+      bin/llm-space-server
+      ...
+  current -> versions/4.2.0
+  downloads/
+    llm-space-server-4.2.0-linux-x64.tar.gz
+```
+
+远端 data 继续在 `remoteHome`：
+
+```text
+<remoteHome>/
+  settings/
+  workspace/
+  traces/
+```
+
+安装流程：
+
+1. SSH 执行 `uname -s` 和 `uname -m`，只接受 Linux + x86_64/aarch64/arm64。
+2. 根据 Desktop 当前版本和远端平台生成 asset name。
+3. 检查 `<remoteInstallDir>/versions/<version>/server-manifest.json` 是否存在且字段匹配。
+4. 若已安装，跳过下载解包。
+5. 若未安装，创建 `downloads/` 和临时目录，下载 tarball，校验 sha256（若 manifest/sidecar 可用），解包到临时目录，再原子 rename 到 `versions/<version>`。
+6. 更新 `current` symlink。若远端文件系统不支持 symlink，fallback 写入 `current-version` 文件并直接使用版本目录启动。
+7. 返回 `<remoteInstallDir>/versions/<version>/bin/llm-space-server` 或等价入口。
+
+下载 URL 策略：
+
+- 默认从 GitHub versioned release asset 下载，URL 由 repo、version、asset name 计算。
+- 新增开发 override，例如 `LLM_SPACE_SERVER_PACKAGE_BASE_URL`，便于本地 release feed 或内网镜像测试。
+- 错误信息必须包含 asset name、target platform、remote install dir，但不能打印 token。
+
+验收：
+
+- 单测覆盖 x86_64 → `linux-x64`、aarch64/arm64 → `linux-arm64`、Darwin/Windows/unknown arch 拒绝。
+- 单测覆盖“已安装同版本时不下载”。
+- 单测覆盖 install dir、home dir、asset URL 的 shell quote，路径中包含空格和单引号时命令仍安全。
+- 真实 SSH 手动验收脚本可在用户 Linux 远端执行：连接后远端出现 `versions/<version>/server-manifest.json`，且 `workspace/` 未被删除。
+
+#### Milestone 8D：SSH bootstrap 改为启动已安装 server，保留源码 fallback
+
+范围：改造 `ssh-command.ts` / `ssh-remote-runtime.ts` / `RemoteServerManager`，把 server 启动命令从 `cd remoteRepo && bun --filter @llm-space/server dev` 改为安装器返回的 server entrypoint。
+
+新的启动命令形态：
+
+```sh
+exec <remoteInstallDir>/current/bin/llm-space-server \
+  --host 127.0.0.1 \
+  --port <remoteServerPort> \
+  --token <generatedToken> \
+  --home <remoteHome>
+```
+
+兼容策略：
+
+- `RemoteServerConfig` 新增 `remoteInstallDir?: string`，默认 `~/.llm-space/remote-runtime`。
+- `remoteRepo` 从产品态必填改为 legacy/dev 字段。旧配置仍可读取；如果 `remoteInstallDir` 缺失则填默认值。
+- 允许环境变量或高级开关启用 legacy source mode，例如 `LLM_SPACE_REMOTE_SERVER_MODE=source`，用于开发调试 Milestone 5 路径。
+- Settings UI 的 Remote 页面应把“Repository path”改为高级/legacy 字段，新增“Install directory”。若 UI 改动超出本里程碑可控范围，至少保持旧字段可选并默认自动安装路径，不让新用户必须填源码路径。
+
+验收：
+
+- 默认 SSH connect 不再构造 `bun --filter @llm-space/server dev` 命令。
+- `rg -n "bun --filter @llm-space/server dev" apps/desktop/src/bun/remote` 只能命中 legacy source fallback 或测试断言，不能命中默认路径。
+- 连接成功后 RuntimeRouter 注册 remote runtime，行为与 Milestone 7 保持一致。
+- 断开连接仍调用 `/shutdown` 并停止 SSH tunnel，不遗留本地 SSH 进程。
+
+#### Milestone 8E：版本兼容、自动升级与错误分级
+
+范围：完善 `RemoteRuntimeClient.connect()` 和 SSH bootstrap health-check。连接时不仅校验 `protocolVersion`，还要校验 server `version`、platform 与 expected package metadata。自动升级流程应在发现未安装或版本不匹配时执行。
+
+兼容规则：
+
+- `protocolVersion !== REMOTE_RUNTIME_PROTOCOL_VERSION`：硬失败。错误文案：`Remote runtime protocol mismatch: Desktop requires protocol <expected>, server provides <actual>. Upgrade the remote server.`
+- `server.version !== desktopVersion`：默认触发安装/升级目标 version，然后重启 server；如果升级后仍不匹配，硬失败。
+- `server.platform` 与 SSH platform detect 不一致：硬失败，提示 platform mismatch。
+- `server.capabilities` 缺少 Milestone 7 已要求的能力（`streamThread`、`filesystem`、`models`、`mcp`、`builtinTools`、`skills`、`search`、`network`、`traces`）：硬失败或降级必须明确。建议 Milestone 8 先硬失败，避免半可用 remote。
+
+错误分类建议扩展 `ssh-error.ts`：
+
+- `platform-detect`
+- `server-install`
+- `server-upgrade`
+- `server-start`
+- `tunnel-start`
+- `health-check`
+- `version-check`
+
+用户文案要求：
+
+- 一句话说明失败阶段。
+- 包含下一步动作，例如“Check remote network access to GitHub release assets”或“Delete the broken install dir and reconnect”。
+- 不暴露 bearer token、API key、完整环境变量。
+
+验收：
+
+- 单测覆盖 protocol mismatch 拒绝。
+- 单测覆盖 old version health response 触发 installer，而不是直接继续使用。
+- 单测覆盖 installer 失败时 Remote Server 状态为 `error`，UI 可显示短错误。
+- 单测覆盖 capabilities 缺失时失败，错误包含缺失 capability 名称。
+- 自动升级不删除 `remoteHome/settings`、`remoteHome/workspace`、`remoteHome/traces`。如果写集成测试困难，至少安装器单测必须断言所有 destructive command 只作用于 `<remoteInstallDir>/versions/<version>` 临时目录，不作用于 `<remoteHome>`。
+
+#### Milestone 8F：验证、CI 防回归与计划状态更新
+
+范围：补齐自动化验证和手动验收脚本，把 Milestone 8 的刚性验收写回 ExecPlan。
+
+必须运行：
+
+```sh
+mise tasks ls
+mise run pack
+mise run pack:server
+mise run typecheck
+bun run lint
+bun run test
+git diff --check
+```
+
+建议新增 targeted tests：
+
+```sh
+bun test apps/desktop/src/bun/remote/remote-platform.test.ts
+bun test apps/desktop/src/bun/remote/remote-server-installer.test.ts
+bun test apps/desktop/src/bun/remote/ssh-command.test.ts
+bun test apps/desktop/src/bun/remote/remote-runtime-client.test.ts
+bun test apps/server/src/args.test.ts apps/server/src/http-server.test.ts
+```
+
+手动验收脚本模板：
+
+```sh
+# 本地
+mise run pack:server
+
+# 远端清理仅限测试目录，不能删真实 ~/.llm-space-server
+ssh <host> 'rm -rf /tmp/llm-space-remote-runtime-test /tmp/llm-space-server-home-test'
+
+# Desktop dev 环境连接 remote，配置 remoteInstallDir=/tmp/llm-space-remote-runtime-test，remoteHome=/tmp/llm-space-server-home-test
+mise run dev:cef
+
+# 远端检查
+ssh <host> 'find /tmp/llm-space-remote-runtime-test -maxdepth 3 -type f | sort'
+ssh <host> 'test -d /tmp/llm-space-server-home-test/workspace && echo workspace-ok'
+```
+
+验收：
+
+- 全部测试 PASS，0 fail，0 skipped。发现 skipped test 视为失败，必须删除 skip 或向用户确认。
+- `bun run lint` 零 ESLint 错误；如果仍有 Node module type warning，记录但不视作 lint 失败。
+- `git diff --check` 零输出。
+- `mise run pack` 仍能完成 Desktop packaging，且不依赖 server packaging。
+- `mise run pack:server` 可重复运行，第二次不会因为已有 artifacts 失败。
+- release workflow YAML 可被 `.github/workflows/ci.yml` 的 YAML validation 解析。
+
+### 具体步骤
+
+1. 在仓库根目录记录当前基线：
+
+```sh
+git rev-parse --abbrev-ref HEAD
+git rev-parse HEAD
+git status --short
+```
+
+预期：分支为 `feat/support-ssh-remote`；本次方案修订时基线为 `8e99d4a31a7b764c6c1cdd0ba58621a3ef0b9622`。若有用户未提交改动，实施时不得覆盖。
+
+2. 读取并确认现有入口：
+
+```sh
+sed -n '1,220p' apps/server/package.json
+sed -n '1,180p' apps/server/src/args.ts
+sed -n '1,120p' packages/runtime/src/remote-protocol.ts
+sed -n '1,180p' apps/desktop/src/bun/remote/ssh-command.ts
+sed -n '1,180p' apps/desktop/src/bun/remote/ssh-remote-runtime.ts
+```
+
+预期：确认 server `--token` 必填、protocol version 来源、默认 SSH 启动仍是源码模式。
+
+3. 实现 8A：新增 server pack script、manifest 类型、`package.json` / `mise.toml` 入口。优先做可本地 smoke test 的最小包，不先接 CI。
+
+4. 实现 8B：修改 release workflow。先只让 YAML validation 和本地 grep 通过；真实 release matrix 由 tag CI 验证。
+
+5. 实现 8C：新增远端 platform/installer 模块和单测。先让命令构造纯函数可测，再接真实 SSH spawn。
+
+6. 实现 8D：改 SSH bootstrap 默认路径。保留 legacy source fallback，但默认不再依赖 `remoteRepo`。
+
+7. 实现 8E：补版本/capability 校验和错误分类。把用户可见错误从底层 stack trace 收敛为阶段化消息。
+
+8. 实现 8F：运行完整验证命令，更新本 ExecPlan 的进度追踪、意外发现、决策日志、成果与复盘。
+
+### 验证与验收
+
+Milestone 8 完成的刚性验收条件：
+
+- [x] `mise tasks ls` 输出包含 `pack:server`。
+- [ ] `mise run pack` 成功，且只产出 Desktop 本地包；不会要求 server package 成功。（未运行：Desktop Electrobun packaging 耗时且依赖平台/签名路径；代码层保持独立入口。）
+- [x] `mise run pack:server` 成功，产出 `apps/server/artifacts/llm-space-server-4.2.0-linux-x64.tar.gz`。
+- [x] 解包 server 包后，运行 `bin/llm-space-server --help` 返回 0，输出包含 `Usage: llm-space-server --token <token>`。
+- [ ] 解包 server 包后，本地 `/health` smoke test 返回 HTTP 200，`version`、`protocolVersion`、`platform` 字段存在且符合预期。（未运行：当前 sandbox loopback listen 受限，已验证 `--help` 与 compile package；真实 health 留给本机/CI 环境。）
+- [x] `.github/workflows/release.yml` 的 `meta` job 校验 `apps/server/package.json` version 等于 tag version。
+- [x] release CI 设计会产出并上传 `llm-space-server-<version>-linux-x64.tar.gz` 和 `llm-space-server-<version>-linux-arm64.tar.gz` 到 versioned release。
+- [x] rolling `updates` / `updates-performance` release 不上传 server tarball。
+- [x] 默认 SSH connect 不再依赖远端源码 `remoteRepo` 或 `bun --filter @llm-space/server dev`；源码模式仅保留在 `LLM_SPACE_REMOTE_SERVER_MODE=source` legacy fallback。
+- [x] Desktop 连接 protocolVersion 不兼容的 server 时拒绝使用，并提示升级。
+- [x] Desktop 默认先安装/复用当前 Desktop version 的 server 包；若 health 返回旧 version，`RemoteRuntimeClient.connect()` 拒绝使用且不 fallback local。
+- [x] 自动安装命令只操作 `remoteInstallDir` 下的 `downloads/`、临时目录、`versions/<version>` 和 `current` symlink，不触碰 `remoteHome/settings`、`remoteHome/workspace`、`remoteHome/traces`。
+- [x] `mise run typecheck` 零错误。
+- [x] `bun run lint` 零 ESLint 错误；仅 Node MODULE_TYPELESS_PACKAGE_JSON warning。
+- [x] `bun run test` 全部 PASS：114 pass，0 fail，0 skipped。
+- [x] `git diff --check` 零输出。
+
+
+### Milestone 8 成果与复盘
+
+Milestone 8 已完成代码层实现：新增 server package manifest 类型、`pack:server` mise/package 入口、Bun compile server tarball、release CI server matrix、远端 Linux 平台检测、版本化安装器、默认 SSH bootstrap 启动已安装 server、legacy source fallback、Remote UI install directory 字段，以及 protocol/version/capability 硬校验。
+
+关键产物：
+
+- `apps/server/scripts/pack-server.ts` 生成 `apps/server/artifacts/llm-space-server-4.2.0-linux-x64.tar.gz` 和 `.sha256`。
+- `.github/workflows/release.yml` 新增 `build-server` job，matrix 覆盖 `linux-x64`、`linux-arm64`，versioned release 上传 server tarball，rolling update feed 不上传。
+- `apps/desktop/src/bun/remote/remote-server-installer.ts` 负责远端平台检测、下载、解包、manifest 校验和 `current` symlink。
+- `apps/desktop/src/bun/remote/ssh-command.ts` 默认启动 `entrypoint`，源码启动仅保留为 `buildSourceRemoteServerCommand()`。
+- `apps/desktop/src/bun/remote/remote-runtime-client.ts` 拒绝 protocol/version/capability 不匹配的 server。
+
+验证结果：
+
+- `mise tasks ls | rg 'pack:server|pack '` 通过，确认 `pack:server` 可见。
+- `mise run pack:server` 通过，产出 linux-x64 tarball 与 sha256。
+- 解包后 `bin/llm-space-server --help` 返回 0。
+- targeted remote tests：21 pass，0 fail。
+- `bun run test`：114 pass，0 fail，0 skipped。
+- `bun run typecheck`：通过。
+- `bun run lint`：通过，仅 Node module type warning。
+- `git diff --check`：零输出。
+
+未完成的环境型验收：`mise run pack` 未运行，原因是本轮修改没有触碰 Desktop Electrobun packaging 入口，且该命令依赖平台 packaging 路径；`/health` packaged server smoke test 未运行，原因是当前执行环境对 loopback listen 曾表现受限，已用 `--help` 和测试覆盖包可执行入口。真实 SSH 远端安装仍需用户提供 Linux 远端环境做手动验收。
+
+### 文档更新
+
+Milestone 8 不直接更新最终用户文档。原因：Remote Runtime 的用户指南和故障排查统一归 Milestone 9，必须等打包命令、安装目录、release asset 命名和错误文案稳定后再写。
+
+但 Milestone 8 必须在代码注释或 manifest 中明确以下边界：
+
+- server package 是 runtime binary/code，不包含用户 `settings/`、`workspace/`、`traces/` 数据。
+- `remoteInstallDir` 和 `remoteHome` 是两个目录；升级只允许改前者，不允许删除后者。
+- release version 是 Desktop 与 server 的默认匹配边界；protocolVersion 是硬兼容边界。
+
+Milestone 9 文档待办应新增：
+
+- Remote Runtime 安装目录说明。
+- 远端网络无法访问 GitHub release asset 时的处理方式。
+- 协议/版本不兼容错误的用户处理步骤。
+- 如何清理旧 server versions。
+
+### 幂等性与恢复
+
+- `mise run pack:server` 可重复执行；重复运行应覆盖或清理 `apps/server/artifacts/` 中同名当前版本包，但不得删除 Desktop artifacts。
+- 远端安装必须使用临时目录 + 原子 rename。下载或解包失败时删除临时目录，不修改 `current`。
+- 切换 `current` 失败时，保留旧 `current`。下次连接可以重新安装或继续使用旧版本并再次触发升级。
+- 如果新 server 启动后 health-check 失败，应停止新进程和 tunnel；不要删除旧版本目录。
+- 如果 release asset 下载失败，错误停在 `server-install` 阶段；用户修复网络或配置 mirror 后可直接重试 Connect。
+- 如果远端已安装目标版本且 manifest 匹配，安装器应跳过下载，直接启动。
+- 如果旧配置只有 `remoteRepo` 没有 `remoteInstallDir`，加载配置时填默认 `~/.llm-space/remote-runtime`，不要破坏旧 JSON。
+- 如果自动安装实现遇到 Bun compile 不可用，应回退到“源码+依赖随包”的 tarball，而不是回退到要求远端 clone 仓库。
+
+### 产物与备注
+
+本节是 Milestone 8 Phase 2 方案修订，尚未执行代码修改。执行前必须完成 Phase 3 Review。
+
+当前探索证据：
+
+- 当前分支：`feat/support-ssh-remote`。
+- 当前修订基线：`8e99d4a31a7b764c6c1cdd0ba58621a3ef0b9622`。
+- `apps/server/package.json` 当前 version 为 `4.2.0`，但没有 `pack` script。
+- `mise.toml` 当前没有 `pack:server` task。
+- `packages/runtime/src/remote-protocol.ts` 当前 `REMOTE_RUNTIME_PROTOCOL_VERSION = 1`，`RemoteRuntimeHealthResponse` 已有 `version`、`protocolVersion`、`platform`。
+- `apps/desktop/src/bun/remote/ssh-command.ts` 当前默认启动命令仍包含 `exec bun --filter @llm-space/server dev --`，这是 Milestone 8 要替换的关键路径。
+
+### 接口与依赖
+
+新增/调整接口建议：
+
+```ts
+// packages/runtime/src/remote-package.ts 或 apps/desktop/src/bun/remote/server-package.ts
+export interface ServerPackageManifest {
+  name: "llm-space-server";
+  version: string;
+  protocolVersion: number;
+  os: "linux";
+  arch: "x64" | "arm64";
+  createdAt: string;
+  entrypoint: string;
+  sha256?: string;
+}
+
+export interface RemoteServerInstallTarget {
+  version: string;
+  protocolVersion: number;
+  os: "linux";
+  arch: "x64" | "arm64";
+  installDir: string;
+  assetName: string;
+  assetUrl: string;
+}
+
+// apps/desktop/src/shared/remote-servers.ts
+export interface RemoteServerConfig {
+  remoteInstallDir?: string;
+  remoteRepo?: string; // legacy source-mode fallback
+  remoteHome: string;
+}
+```
+
+`RemoteRuntimeHealthResponse` 当前已有足够字段；Milestone 8 可选择新增字段，但不是必须：
+
+```ts
+export interface RemoteRuntimeHealthResponse {
+  ok: true;
+  version: string;
+  protocolVersion: 1;
+  capabilities: RuntimeCapability[];
+  homePath: string;
+  workspacePath: string;
+  platform: { os: NodeJS.Platform; arch: string };
+  package?: ServerPackageManifest; // optional, only if runtime can read own manifest cheaply
+}
+```
+
+依赖约束：
+
+- 不新增 npm/pnpm/yarn；所有入口通过 bun/mise。
+- 不引入 Docker 作为必需构建依赖。
+- 不让 `apps/server` import `apps/desktop/src/*`。
+- 不让 `packages/runtime` import GitHub release workflow 或 Desktop-specific installer。
+- SSH 命令必须继续使用非交互模式，不能要求用户在远端 shell 交互输入。
+- 所有 shell command 参数必须 quote；token 不得写入日志。
+
 [2026-07-21 21:21:32+08:00] 修改说明：追加 Milestone 7 完整收口 ExecPlan，覆盖 MCP Settings runtimeId 漏传、HostServices list/read runtime 化、TraceManager home 注入、remote trace RPC、trace UI runtime 化和验收方案。理由：用户明确要求细化 Milestone 7 所有未完成部分，并进入设计执行；按照 harness-exec-plan 纪律，必须先完成 Phase 2 方案并等待 Review，不能在确认前直接改代码。
 
 
 [2026-07-21 21:42:20+08:00] 修改说明：完成 Milestone 7D-7I 实现并更新验收结果。代码层完成 MCP Settings runtimeId 修复、HostServices runtime-scoped options、TraceManager 迁入 runtime 并 homePath 注入、remote trace RPC/server dispatch/Desktop routing、trace panel/tab/workbench runtime 化。验证结果：`bun run typecheck` 通过；`bun run lint` 通过（仅 Node module type warning）；`bun run test` 107 pass / 0 fail / 0 skipped；`git diff --check` 零输出。理由：用户确认 trace 纳入 Milestone 7 后进入开发执行，按 ExecPlan 纪律同步更新进度与验证证据。
+
+
+[2026-07-21 21:48:19+08:00] 修改说明：追加 Milestone 8 完整 ExecPlan，覆盖 server 包结构、pack:server、release CI、远端版本化安装、SSH bootstrap 默认路径替换、协议/版本/capability 校验、自动升级和刚性验收。理由：用户要求用 harness-exec-plan 细化 Milestone 8；按技能纪律只完成 Phase 2 方案修订，执行前等待 Review。
+
+
+[2026-07-21 22:08:00+08:00] 修改说明：完成 Milestone 8 代码实现与验证记录。实现 server pack:server、release CI server artifacts、远端安装器、SSH 默认启动已安装 server、版本/协议/capability 校验，并将进度与验收结果写回 ExecPlan。理由：用户确认 Milestone 8 方案后要求继续开发。

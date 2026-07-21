@@ -61,12 +61,10 @@ describe("RemoteServerManager", () => {
     const [host1] = manager.addServer({
       name: "host1",
       host: "host1",
-      remoteRepo: "/repo",
     });
     const host2 = manager.addServer({
       name: "host2",
       host: "host2",
-      remoteRepo: "/repo",
     })[1];
 
     await manager.connectServer(host1.id);

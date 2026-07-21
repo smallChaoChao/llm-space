@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun src/index.ts",
     "start": "bun src/index.ts",
+    "pack": "bun scripts/pack-server.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

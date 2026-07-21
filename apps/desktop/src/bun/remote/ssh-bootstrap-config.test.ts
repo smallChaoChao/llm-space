@@ -10,20 +10,13 @@ describe("readSshRemoteRuntimeConfig", () => {
     ).toBeNull();
   });
 
-  test("requires host and repo", () => {
+  test("requires host", () => {
     expect(() =>
       readSshRemoteRuntimeConfig({
         LLM_SPACE_ENABLE_REMOTE_RUNTIME: "1",
         LLM_SPACE_REMOTE_BOOTSTRAP: "ssh",
       })
     ).toThrow("LLM_SPACE_REMOTE_SSH_HOST is required");
-    expect(() =>
-      readSshRemoteRuntimeConfig({
-        LLM_SPACE_ENABLE_REMOTE_RUNTIME: "1",
-        LLM_SPACE_REMOTE_BOOTSTRAP: "ssh",
-        LLM_SPACE_REMOTE_SSH_HOST: "host",
-      })
-    ).toThrow("LLM_SPACE_REMOTE_REPO is required");
   });
 
   test("builds default ssh config", () => {
@@ -41,6 +34,7 @@ describe("readSshRemoteRuntimeConfig", () => {
       host: "host",
       port: 22,
       remoteRepo: "/repo",
+      remoteInstallDir: "~/.llm-space/remote-runtime",
       remoteHome: "~/.llm-space-server",
       remoteServerPort: 39123,
       makeDefault: true,

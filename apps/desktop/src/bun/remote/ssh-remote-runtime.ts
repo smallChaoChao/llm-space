@@ -5,8 +5,14 @@ import { REMOTE_RUNTIME_PROTOCOL_VERSION } from "@llm-space/runtime/remote-proto
 import { findFreePort } from "./port";
 import { spawnManagedProcess, type ManagedProcess } from "./process-utils";
 import { RemoteRuntimeClient } from "./remote-runtime-client";
+import { installRemoteServerPackage } from "./remote-server-installer";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
-import { buildRemoteServerArgs, buildTunnelArgs } from "./ssh-command";
+import {
+  buildRemoteServerArgs,
+  buildSourceRemoteServerCommand,
+  buildSshBaseArgs,
+  buildTunnelArgs,
+} from "./ssh-command";
 import { formatSshBootstrapFailure } from "./ssh-error";
 
 export interface SshRemoteRuntimeHandle {
@@ -22,10 +28,37 @@ export async function startSshRemoteRuntime(
   const processes: ManagedProcess[] = [];
 
   try {
+    let install;
+    try {
+      install = await installRemoteServerPackage(config);
+    } catch (error) {
+      throw new Error(
+        `SSH remote runtime bootstrap failed during server-install: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error }
+      );
+    }
     const serverProcess = spawnManagedProcess(
       "remote server",
       "ssh",
-      buildRemoteServerArgs({ config, token })
+      process.env.LLM_SPACE_REMOTE_SERVER_MODE === "source"
+        ? [
+            ...buildSshBaseArgs(config),
+            buildSourceRemoteServerCommand({
+              remoteRepo: config.remoteRepo,
+              host: "127.0.0.1",
+              port: config.remoteServerPort,
+              token,
+              home: config.remoteHome,
+            }),
+          ]
+        : buildRemoteServerArgs({
+            config,
+            token,
+            entrypoint: install.entrypoint,
+          }),
+      { collectOutput: false }
     );
     processes.push(serverProcess);
     await _waitForProcessAlive(serverProcess, "server-start", config);

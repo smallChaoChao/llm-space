@@ -10,7 +10,8 @@ export interface ManagedProcess {
 export function spawnManagedProcess(
   label: string,
   command: string,
-  args: string[]
+  args: string[],
+  options: { collectOutput?: boolean } = {}
 ): ManagedProcess {
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "pipe"],
@@ -22,7 +23,9 @@ export function spawnManagedProcess(
       output = output.slice(-20_000);
     }
   };
-  child.stdout?.on("data", append);
+  if (options.collectOutput !== false) {
+    child.stdout?.on("data", append);
+  }
   child.stderr?.on("data", append);
 
   return {

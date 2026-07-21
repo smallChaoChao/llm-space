@@ -38,11 +38,12 @@ export function buildTunnelArgs(input: {
 export function buildRemoteServerArgs(input: {
   config: SshRemoteRuntimeConfig;
   token: string;
+  entrypoint: string;
 }): string[] {
   return [
     ...buildSshBaseArgs(input.config),
     buildRemoteServerCommand({
-      remoteRepo: input.config.remoteRepo,
+      entrypoint: input.entrypoint,
       host: "127.0.0.1",
       port: input.config.remoteServerPort,
       token: input.token,
@@ -52,6 +53,27 @@ export function buildRemoteServerArgs(input: {
 }
 
 export function buildRemoteServerCommand(input: {
+  entrypoint: string;
+  host: string;
+  port: number;
+  token: string;
+  home: string;
+}): string {
+  return [
+    "exec",
+    shellQuote(input.entrypoint),
+    "--host",
+    shellQuote(input.host),
+    "--port",
+    String(input.port),
+    "--token",
+    shellQuote(input.token),
+    "--home",
+    shellQuote(input.home),
+  ].join(" ");
+}
+
+export function buildSourceRemoteServerCommand(input: {
   remoteRepo: string;
   host: string;
   port: number;

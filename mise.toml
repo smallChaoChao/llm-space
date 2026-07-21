@@ -110,6 +110,10 @@ dir = "apps/desktop"
 env = { LLM_SPACE_SKIP_NOTARIZE = "1" }
 run = "bun run build:canary"
 
+[tasks."pack:server"]
+description = "Build the headless remote runtime server tarball"
+run = "bun run pack:server"
+
 # --- Local auto-update loop: `feed:serve` in one terminal, then `pack:feed`
 # --- once per version; launch the app from a copy outside build/ ------------
 
