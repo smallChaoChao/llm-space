@@ -3,13 +3,6 @@
 import { ModelProvider } from "@llm-space/ui/components/model-provider";
 import { Dialog, DialogContent } from "@llm-space/ui/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@llm-space/ui/ui/select";
-import {
   Tabs,
   TabsContent,
   TabsList,
@@ -28,10 +21,10 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { getDefaultRuntime, listRuntimes } from "@/client/remote-servers";
+import { getDefaultRuntime } from "@/client/remote-servers";
 import { createElectrobunModelClient } from "@/host/host-services";
 import type { SettingsTab } from "@/shared/commands";
-import type { RuntimeId, RuntimeView } from "@/shared/runtime";
+import type { RuntimeId } from "@/shared/runtime";
 
 import { AccountPage } from "./account-page";
 import { ExperimentalPage } from "./experimental-page";
@@ -124,44 +117,21 @@ export function SettingsDialog({
   onTabChange: (tab: SettingsTab) => void;
 }) {
   const [runtimeId, setRuntimeId] = useState<RuntimeId>("local");
-  const [runtimes, setRuntimes] = useState<RuntimeView[]>([]);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void Promise.all([listRuntimes(), getDefaultRuntime()])
-      .then(([next, defaultRuntimeId]) => {
-        if (cancelled) return;
-        setRuntimes(next);
-        setRuntimeId(
-          next.some((runtime) => runtime.id === defaultRuntimeId)
-            ? defaultRuntimeId
-            : "local"
-        );
+    void getDefaultRuntime()
+      .then((defaultRuntimeId) => {
+        if (!cancelled) setRuntimeId(defaultRuntimeId);
       })
       .catch(() => {
-        if (!cancelled) {
-          setRuntimes([]);
-          setRuntimeId("local");
-        }
+        if (!cancelled) setRuntimeId("local");
       });
     return () => {
       cancelled = true;
     };
   }, [open]);
-
-  const runtimeOptions =
-    runtimes.length > 0
-      ? runtimes
-      : ([
-          {
-            id: "local",
-            kind: "local",
-            name: "Local",
-            status: "connected",
-            capabilities: [],
-          },
-        ] satisfies RuntimeView[]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -181,26 +151,8 @@ export function SettingsDialog({
           onValueChange={(value) => onTabChange(value as SettingsTab)}
         >
           <aside className="bg-muted/30 flex w-50 shrink-0 flex-col gap-2 border-r p-3">
-            <header className="space-y-2">
+            <header>
               <div className="text-base font-medium">Settings</div>
-              <Select
-                value={runtimeId}
-                onValueChange={(value) => setRuntimeId(value as RuntimeId)}
-              >
-                <SelectTrigger
-                  className="h-7 w-full text-xs"
-                  aria-label="Settings runtime"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {runtimeOptions.map((runtime) => (
-                    <SelectItem key={runtime.id} value={runtime.id}>
-                      {runtime.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </header>
             <TabsList className="h-fit w-full flex-col gap-0.5 bg-transparent p-0">
               {PAGES.map(({ value, label, icon: Icon }) => (

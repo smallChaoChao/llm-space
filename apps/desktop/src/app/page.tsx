@@ -11,13 +11,6 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@llm-space/ui/ui/resizable";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@llm-space/ui/ui/select";
 import { FileTextIcon, GitBranchIcon } from "lucide-react";
 import {
   lazy,
@@ -40,6 +33,7 @@ import { FileSystemTreeView } from "@/components/file-system-tree-view";
 import { GithubAuthProvider } from "@/components/github-auth-provider";
 import { GithubDeviceDialog } from "@/components/github-device-dialog";
 import { GithubStarReminder } from "@/components/github-star-reminder";
+import { RemoteStatus } from "@/components/remote-status";
 import { SharedImportProvider } from "@/components/shared-import-provider";
 import { ThreadTabs, useThreadTabs } from "@/components/thread-tabs";
 import { UpdateIndicator } from "@/components/update-indicator";
@@ -55,7 +49,7 @@ import {
 } from "@/lib/import-threads";
 import { useFullScreen } from "@/lib/use-full-screen";
 import type { SettingsTab } from "@/shared/commands";
-import type { RuntimeId, RuntimeView } from "@/shared/runtime";
+import type { RuntimeId } from "@/shared/runtime";
 import type { TraceRecord } from "@/shared/traces";
 
 // Overlay surfaces that aren't part of the first paint — settings, the command
@@ -263,7 +257,6 @@ function PageInner() {
   const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
   const [workspaceRuntimeId, setWorkspaceRuntimeId] =
     useState<RuntimeId>("local");
-  const [runtimes, setRuntimes] = useState<RuntimeView[]>([]);
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
 
@@ -273,7 +266,6 @@ function PageInner() {
         listRuntimes(),
         getDefaultRuntime(),
       ]);
-      setRuntimes(next);
       setWorkspaceRuntimeId((current) => {
         if (
           syncDefault &&
@@ -290,13 +282,7 @@ function PageInner() {
   );
 
   useEffect(() => {
-    let cancelled = false;
-    void refreshRuntimes({ syncDefault: true }).catch(() => {
-      if (!cancelled) setRuntimes([]);
-    });
-    return () => {
-      cancelled = true;
-    };
+    void refreshRuntimes({ syncDefault: true }).catch(() => undefined);
   }, [refreshRuntimes]);
 
   useEffect(() => {
@@ -557,6 +543,13 @@ function PageInner() {
                 />
               </div>
             )}
+            <RemoteStatus
+              runtimeId={workspaceRuntimeId}
+              onDisconnected={() => {
+                setWorkspaceRuntimeId("local");
+                void refreshRuntimes({ syncDefault: true });
+              }}
+            />
             <AccountStatus />
           </ResizablePanel>
           <ResizableHandle />
@@ -597,42 +590,7 @@ function PageInner() {
                 onMove={tabs.handleMove}
                 onTraceTitleChange={tabs.handleTraceTitleChange}
                 onToggleSidebar={handleToggleSidebar}
-                toolbarSlot={
-                  <>
-                    <Select
-                      value={workspaceRuntimeId}
-                      onValueChange={(value) =>
-                        setWorkspaceRuntimeId(value as RuntimeId)
-                      }
-                    >
-                      <SelectTrigger
-                        className="h-7 w-36 text-xs"
-                        aria-label="Workspace runtime"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(runtimes.length
-                          ? runtimes
-                          : [
-                              {
-                                id: "local",
-                                name: "Local",
-                                kind: "local",
-                                status: "connected",
-                                capabilities: [],
-                              } satisfies RuntimeView,
-                            ]
-                        ).map((runtime) => (
-                          <SelectItem key={runtime.id} value={runtime.id}>
-                            {runtime.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <UpdateIndicator />
-                  </>
-                }
+                toolbarSlot={<UpdateIndicator />}
               />
             )}
           </ResizablePanel>
