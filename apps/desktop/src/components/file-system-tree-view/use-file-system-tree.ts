@@ -9,8 +9,6 @@ import {
 } from "@llm-space/core";
 import {
   LOCAL_STORAGE_KEYS,
-  readLocalStorage,
-  writeLocalStorage,
 } from "@llm-space/ui/lib/local-storage";
 import {
   basename,
@@ -54,8 +52,9 @@ function _persistedExpandedKey(runtimeId: RuntimeId): string {
 }
 
 function _loadPersistedExpanded(runtimeId: RuntimeId): string[] {
+  if (typeof window === "undefined") return [];
   try {
-    const raw = readLocalStorage(_persistedExpandedKey(runtimeId));
+    const raw = window.localStorage.getItem(_persistedExpandedKey(runtimeId));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -69,7 +68,15 @@ function _loadPersistedExpanded(runtimeId: RuntimeId): string[] {
 
 /** Persist the expanded paths, ignoring any storage failure. */
 function _savePersistedExpanded(runtimeId: RuntimeId, paths: string[]): void {
-  writeLocalStorage(_persistedExpandedKey(runtimeId), JSON.stringify(paths));
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      _persistedExpandedKey(runtimeId),
+      JSON.stringify(paths)
+    );
+  } catch {
+    // Storage unavailable (private mode, quota) => persistence is best-effort.
+  }
 }
 
 /**

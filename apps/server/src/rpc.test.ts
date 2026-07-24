@@ -1,5 +1,6 @@
-import type { RuntimeClient } from "@llm-space/runtime/runtime";
 import { describe, expect, test } from "bun:test";
+
+import type { RuntimeClient } from "@llm-space/runtime/runtime";
 
 import { handleRuntimeRpc } from "./rpc";
 

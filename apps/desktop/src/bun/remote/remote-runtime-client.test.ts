@@ -1,8 +1,10 @@
-import type { AgentEvent, AgentStreamRequest } from "@llm-space/core";
-import type { RuntimeCapability } from "@llm-space/runtime/runtime";
 import { describe, expect, test } from "bun:test";
 
+import type { AgentEvent, AgentStreamRequest } from "@llm-space/core";
+import type { RuntimeCapability } from "@llm-space/runtime/runtime";
+
 import { RemoteRuntimeClient } from "./remote-runtime-client";
+import { currentDesktopVersion } from "./server-package";
 
 const CAPABILITIES: RuntimeCapability[] = [
   "streamThread",
@@ -18,7 +20,7 @@ const CAPABILITIES: RuntimeCapability[] = [
 
 const HEALTH_BODY = {
   ok: true,
-  version: "4.2.0",
+  version: currentDesktopVersion(),
   protocolVersion: 1,
   capabilities: CAPABILITIES,
   homePath: "/tmp/remote",

@@ -278,7 +278,7 @@ function _stringArrayParam(
       `RPC param "${name}" must be a string array.`
     );
   }
-  return value;
+  return value.filter((item): item is string => typeof item === "string");
 }
 
 function _threadParam(params: Record<string, unknown>): Thread {
