@@ -45,7 +45,7 @@ interface FormState {
   localPort: string;
 }
 
-const DEFAULT_REMOTE_HOME = "/tmp/llm-space-server-ui-test";
+const DEFAULT_REMOTE_HOME = "~/.llm-space-server";
 const DEFAULT_REMOTE_INSTALL_DIR = "~/.llm-space/remote-runtime";
 
 function _emptyForm(): FormState {

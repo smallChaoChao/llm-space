@@ -96,6 +96,9 @@ export function buildSourceRemoteServerCommand(input: {
   ].join(" ");
 }
 
-export function shellQuote(value: string): string {
+export function shellQuote(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error(`Cannot shell-quote non-string value: ${String(value)}`);
+  }
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }

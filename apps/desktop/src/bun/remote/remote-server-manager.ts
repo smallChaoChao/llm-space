@@ -274,7 +274,9 @@ export class RemoteServerManager {
     const parsed = JSON.parse(
       readFileSync(this._configPath, "utf8")
     ) as RemoteServersConfigFile;
-    return Array.isArray(parsed.servers) ? parsed.servers : [];
+    return Array.isArray(parsed.servers)
+      ? parsed.servers.map((server) => this._normalizeLoadedServer(server))
+      : [];
   }
 
   private _save(): void {
@@ -284,6 +286,23 @@ export class RemoteServerManager {
       `${JSON.stringify({ servers: this._servers }, null, 2)}\n`,
       "utf8"
     );
+  }
+
+  private _normalizeLoadedServer(
+    server: RemoteServerConfig
+  ): RemoteServerConfig {
+    return {
+      ...server,
+      remoteRepo: _optional(server.remoteRepo),
+      remoteInstallDir:
+        _optional(server.remoteInstallDir) ?? DEFAULT_REMOTE_INSTALL_DIR,
+      remoteHome: _optional(server.remoteHome) ?? "~/.llm-space-server",
+      remoteServerPort: _port(
+        server.remoteServerPort,
+        39123,
+        "Remote server port"
+      ),
+    };
   }
 }
 

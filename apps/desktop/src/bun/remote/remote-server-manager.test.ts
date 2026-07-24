@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -37,11 +37,10 @@ function _manager(
   start: (config: SshRemoteRuntimeConfig) => Promise<{
     client: RuntimeClient;
     stop(): Promise<void>;
-  }>
+  }>,
+  home = mkdtempSync(path.join(tmpdir(), "llm-space-remote-manager-test-"))
 ): RemoteServerManager {
-  process.env.LLM_SPACE_HOME = mkdtempSync(
-    path.join(tmpdir(), "llm-space-remote-manager-test-")
-  );
+  process.env.LLM_SPACE_HOME = home;
   return new RemoteServerManager(new RuntimeRouter(_localRuntime()), start);
 }
 
@@ -79,6 +78,48 @@ describe("RemoteServerManager", () => {
     );
     expect(next.find((server) => server.id === host2.id)?.defaultRuntime).toBe(
       true
+    );
+  });
+
+  test("loads legacy server config with default install directory", () => {
+    const home = mkdtempSync(
+      path.join(tmpdir(), "llm-space-remote-manager-test-")
+    );
+    const settingsDir = path.join(home, "settings");
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(
+      path.join(settingsDir, "remote-servers.json"),
+      `${JSON.stringify(
+        {
+          servers: [
+            {
+              id: "legacy",
+              kind: "ssh",
+              name: "legacy host",
+              host: "host",
+              port: 22,
+              remoteHome: "~/.llm-space-server",
+              remoteServerPort: 39123,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          ],
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const manager = _manager(
+      () => {
+        throw new Error("unexpected connect");
+      },
+      home
+    );
+
+    expect(manager.listServers()[0]?.remoteInstallDir).toBe(
+      "~/.llm-space/remote-runtime"
     );
   });
 });

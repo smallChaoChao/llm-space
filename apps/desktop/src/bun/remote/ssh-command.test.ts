@@ -70,6 +70,12 @@ describe("ssh command builders", () => {
     expect(command).toContain("--home '/tmp/home path'");
   });
 
+  test("rejects non-string shell quote input with clear error", () => {
+    expect(() => shellQuote(undefined)).toThrow(
+      "Cannot shell-quote non-string value: undefined"
+    );
+  });
+
   test("keeps source mode as legacy fallback", () => {
     const command = buildSourceRemoteServerCommand({
       remoteRepo: "/repo path/llm-space",
