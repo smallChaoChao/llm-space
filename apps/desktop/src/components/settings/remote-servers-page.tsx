@@ -2,10 +2,19 @@
 
 import { cn } from "@llm-space/ui/lib/utils";
 import { Button } from "@llm-space/ui/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@llm-space/ui/ui/dialog";
 import { Input } from "@llm-space/ui/ui/input";
 import { Separator } from "@llm-space/ui/ui/separator";
 import {
   CheckCircle2,
+  ShieldAlert,
   Loader2,
   Plus,
   RefreshCw,
@@ -20,11 +29,14 @@ import {
   connectRemoteServer,
   disconnectRemoteServer,
   listRemoteServers,
+  rejectRemoteServerHostKey,
   removeRemoteServer,
   subscribeRemoteServerStatusChanged,
+  trustRemoteServerHostKey,
   updateRemoteServer,
 } from "@/client/remote-servers";
 import type {
+  RemoteHostKeyTrustRequest,
   RemoteServerDraft,
   RemoteServerView,
 } from "@/shared/remote-servers";
@@ -59,6 +71,7 @@ export function RemoteServersPage({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [trustBusy, setTrustBusy] = useState(false);
 
   const selected = useMemo(
     () => servers.find((server) => server.id === selectedId) ?? null,
@@ -137,7 +150,7 @@ export function RemoteServersPage({
       setSelectedId(id);
       if (options.closeOnConnected) {
         const connected = next.find((server) => server.id === id);
-        if (connected) onConnected?.(connected.runtimeId);
+        if (connected?.status === "connected") onConnected?.(connected.runtimeId);
       }
       if (options.notifyDisconnected && previousRuntimeId) {
         onDisconnected?.(previousRuntimeId);
@@ -150,6 +163,44 @@ export function RemoteServersPage({
       });
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const trustHostKey = async (
+    server: RemoteServerView,
+    request: RemoteHostKeyTrustRequest
+  ) => {
+    setTrustBusy(true);
+    try {
+      const next = await trustRemoteServerHostKey(server.id, request.requestId);
+      updateServers(next);
+      const connected = next.find((item) => item.id === server.id);
+      if (connected?.status === "connected") onConnected?.(connected.runtimeId);
+    } catch (error) {
+      toast.error("Failed to trust SSH host", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setTrustBusy(false);
+    }
+  };
+
+  const rejectHostKey = async (
+    server: RemoteServerView,
+    request: RemoteHostKeyTrustRequest
+  ) => {
+    setTrustBusy(true);
+    try {
+      const next = await rejectRemoteServerHostKey(server.id, request.requestId);
+      updateServers(next);
+    } catch (error) {
+      toast.error("Failed to cancel SSH host trust", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setTrustBusy(false);
     }
   };
 
@@ -225,6 +276,8 @@ export function RemoteServersPage({
                     </span>
                     {server.status === "connected" ? (
                       <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+                    ) : server.status === "trust-required" ? (
+                      <ShieldAlert className="size-4 shrink-0 text-amber-500" />
                     ) : busyId === server.id ||
                       server.status === "connecting" ? (
                       <Loader2 className="size-4 shrink-0 animate-spin" />
@@ -264,6 +317,9 @@ export function RemoteServersPage({
                   notifyDisconnected: true,
                 })
               }
+              onTrustHostKey={(request) => void trustHostKey(selected, request)}
+              onRejectHostKey={(request) => void rejectHostKey(selected, request)}
+              trustBusy={trustBusy}
             />
           ) : (
             <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
@@ -283,6 +339,9 @@ function RemoteServerDetails({
   onDisconnect,
   onEdit,
   onRemove,
+  onTrustHostKey,
+  onRejectHostKey,
+  trustBusy,
 }: {
   server: RemoteServerView;
   busy: boolean;
@@ -290,6 +349,9 @@ function RemoteServerDetails({
   onDisconnect: () => void;
   onEdit: () => void;
   onRemove: () => void;
+  onTrustHostKey: (request: RemoteHostKeyTrustRequest) => void;
+  onRejectHostKey: (request: RemoteHostKeyTrustRequest) => void;
+  trustBusy: boolean;
 }) {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
@@ -338,7 +400,93 @@ function RemoteServerDetails({
           Remove
         </Button>
       </div>
+      {server.trustRequest ? (
+        <SshHostKeyDialog
+          request={server.trustRequest}
+          busy={trustBusy}
+          onTrust={() => onTrustHostKey(server.trustRequest!)}
+          onReject={() => onRejectHostKey(server.trustRequest!)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function SshHostKeyDialog({
+  request,
+  busy,
+  onTrust,
+  onReject,
+}: {
+  request: RemoteHostKeyTrustRequest;
+  busy: boolean;
+  onTrust: () => void;
+  onReject: () => void;
+}) {
+  const [verified, setVerified] = useState(false);
+  const changed = request.kind === "changed";
+
+  useEffect(() => {
+    setVerified(false);
+  }, [request.requestId]);
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onReject()}>
+      <DialogContent className="sm:max-w-xl" showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>
+            {changed ? "SSH host key changed" : "Trust this SSH host?"}
+          </DialogTitle>
+          <DialogDescription>
+            {changed
+              ? "OpenSSH reports this host key changed. Continue only after you have verified this is the expected server."
+              : "LLM Space has not connected to this SSH host before. Confirm the fingerprint before continuing."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2 rounded-lg border p-3 text-sm">
+          <Info label="Host" value={request.host} />
+          <Info label="Target" value={request.target} />
+          {request.resolvedHost ? (
+            <Info label="Resolved" value={_endpoint(request)} />
+          ) : null}
+          {request.user ? <Info label="User" value={request.user} /> : null}
+          <Info label="Key type" value={request.keyType} />
+          <Info label="Fingerprint" value={request.fingerprint} />
+          {request.knownHostsFile ? (
+            <Info label="known_hosts" value={request.knownHostsFile} />
+          ) : null}
+          {request.knownHostsLine ? (
+            <Info label="Offending line" value={String(request.knownHostsLine)} />
+          ) : null}
+        </div>
+        {changed ? (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              className="mt-1"
+              type="checkbox"
+              checked={verified}
+              onChange={(event) => setVerified(event.target.checked)}
+            />
+            <span>
+              I verified this host identity with the administrator or server
+              console.
+            </span>
+          </label>
+        ) : null}
+        <DialogFooter>
+          <Button variant="ghost" disabled={busy} onClick={onReject}>
+            Cancel
+          </Button>
+          <Button
+            variant={changed ? "destructive" : "default"}
+            disabled={busy || (changed && !verified)}
+            onClick={onTrust}
+          >
+            {changed ? "Replace key and continue" : "Trust and continue"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -443,4 +591,9 @@ function _failureTitle(server: RemoteServerView | undefined): string {
     return "Remote server action failed";
   }
   return `${server.stageLabel} failed`;
+}
+
+function _endpoint(request: RemoteHostKeyTrustRequest): string {
+  const port = request.port ? `:${request.port}` : "";
+  return `${request.resolvedHost}${port}`;
 }

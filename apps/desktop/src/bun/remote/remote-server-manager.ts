@@ -11,6 +11,7 @@ import type {
 
 import type {
   RemoteConnectionStage,
+  RemoteHostKeyTrustRequest,
   RemoteServerConfig,
   RemoteServerDraft,
   RemoteServerStatusChangedPayload,
@@ -19,6 +20,10 @@ import type {
 
 import { DEFAULT_REMOTE_INSTALL_DIR } from "./server-package";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
+import {
+  OpenSshHostKeyService,
+  type SshHostKeyService,
+} from "./ssh-host-key";
 import { startSshRemoteRuntime } from "./ssh-remote-runtime";
 
 interface RemoteRuntimeHandle {
@@ -48,11 +53,12 @@ type PersistedRemoteServerConfig = RemoteServerConfig & {
 const REMOTE_SERVERS_CONFIG_VERSION = 2;
 
 interface ConnectedServer {
-  status: "connected" | "connecting" | "error";
+  status: "connected" | "connecting" | "error" | "trust-required";
   stage: RemoteConnectionStage;
   stageLabel: string;
   updatedAt: number;
   handle?: RemoteRuntimeHandle;
+  trustRequest?: RemoteHostKeyTrustRequest;
   error?: string;
 }
 
@@ -69,7 +75,9 @@ export class RemoteServerManager {
     private readonly _runtimeRouter: RuntimeRouter,
     private readonly _startSshRemoteRuntime: StartSshRemoteRuntime =
       startSshRemoteRuntime,
-    private _onStatusChanged?: RemoteServerStatusListener
+    private _onStatusChanged?: RemoteServerStatusListener,
+    private readonly _hostKeyService: SshHostKeyService =
+      new OpenSshHostKeyService()
   ) {
     this._servers = this._load();
   }
@@ -142,6 +150,20 @@ export class RemoteServerManager {
       stageLabel: "Checking SSH access",
     });
     try {
+      const sshConfig = this._sshConfig(server);
+      const hostKey = await this._hostKeyService.check(sshConfig);
+      if (hostKey.status === "first-time" || hostKey.status === "changed") {
+        this._setConnection(id, {
+          status: "trust-required",
+          stage: "host-key-check",
+          stageLabel: "Confirm SSH host identity",
+          trustRequest: hostKey.request,
+        });
+        return this.listServers();
+      }
+      if (hostKey.status === "error") {
+        throw new Error(hostKey.message);
+      }
       const handle = await this._startSshRemoteRuntime(this._sshConfig(server), {
         onProgress: ({ stage, message }) =>
           this._setConnection(id, {
@@ -173,6 +195,45 @@ export class RemoteServerManager {
 
   async disconnectServer(id: string): Promise<RemoteServerView[]> {
     return this._enqueue(() => this._disconnectServer(id));
+  }
+
+  async trustServerHostKey(
+    id: string,
+    requestId: string
+  ): Promise<RemoteServerView[]> {
+    return this._enqueue(async () => {
+      const server = this._find(id);
+      const connection = this._connections.get(id);
+      const request = connection?.trustRequest;
+      if (connection?.status !== "trust-required" || !request) {
+        throw new Error(`Remote server is not waiting for host trust: ${id}`);
+      }
+      if (request.requestId !== requestId) {
+        throw new Error("SSH host key trust request is stale.");
+      }
+      await this._hostKeyService.trust(this._sshConfig(server), request);
+      this._connections.delete(id);
+      return this._connectServer(id);
+    });
+  }
+
+  async rejectServerHostKey(
+    id: string,
+    requestId: string
+  ): Promise<RemoteServerView[]> {
+    return this._enqueue(() => {
+      const connection = this._connections.get(id);
+      const request = connection?.trustRequest;
+      if (connection?.status !== "trust-required" || !request) {
+        return this.listServers();
+      }
+      if (request.requestId !== requestId) {
+        throw new Error("SSH host key trust request is stale.");
+      }
+      this._connections.delete(id);
+      this._emitStatusChanged();
+      return this.listServers();
+    });
   }
 
   private async _disconnectServer(id: string): Promise<RemoteServerView[]> {
@@ -230,7 +291,7 @@ export class RemoteServerManager {
     );
   }
 
-  private _enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  private _enqueue<T>(operation: () => Promise<T> | T): Promise<T> {
     const run = this._operationQueue.then(operation, operation);
     this._operationQueue = run.then(
       () => undefined,
@@ -251,6 +312,9 @@ export class RemoteServerManager {
       ...(connection?.stageLabel ? { stageLabel: connection.stageLabel } : {}),
       ...(connection?.updatedAt
         ? { statusUpdatedAt: connection.updatedAt }
+        : {}),
+      ...(connection?.trustRequest
+        ? { trustRequest: connection.trustRequest }
         : {}),
       ...(connection?.error ? { error: connection.error } : {}),
     };
@@ -287,7 +351,8 @@ export class RemoteServerManager {
   }
 
   private _assertNotConnected(id: string, action: string): void {
-    if (this._connections.get(id)?.status === "connected") {
+    const status = this._connections.get(id)?.status;
+    if (status === "connected" || status === "connecting" || status === "trust-required") {
       throw new Error(`Disconnect remote server before ${action}: ${id}`);
     }
   }
@@ -382,6 +447,7 @@ export class RemoteServerManager {
 function _connectionStage(stage: string): RemoteConnectionStage {
   switch (stage) {
     case "platform-detect":
+    case "host-key-check":
     case "server-install":
     case "server-start":
     case "tunnel-start":

@@ -80,6 +80,24 @@ export function connectRemoteServer(
   return _notifyAfter(_rpc().request.remoteConnectServer({ serverId }));
 }
 
+export function trustRemoteServerHostKey(
+  serverId: string,
+  requestId: string
+): Promise<RemoteServerView[]> {
+  return _notifyAfter(
+    _rpc().request.remoteTrustServerHostKey({ serverId, requestId })
+  );
+}
+
+export function rejectRemoteServerHostKey(
+  serverId: string,
+  requestId: string
+): Promise<RemoteServerView[]> {
+  return _notifyAfter(
+    _rpc().request.remoteRejectServerHostKey({ serverId, requestId })
+  );
+}
+
 export function disconnectRemoteServer(
   serverId: string
 ): Promise<RemoteServerView[]> {

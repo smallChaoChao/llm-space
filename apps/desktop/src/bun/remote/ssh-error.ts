@@ -94,9 +94,9 @@ function _knownHostsAction(
     return `After confirming it is safe, remove that stale known_hosts entry and reconnect.`;
   }
   if (target) {
-    return `If this is a first-time connection, run ssh ${target} once in Terminal to review and trust the host key, then reconnect.`;
+    return `If this is a first-time connection, use the LLM Space host identity prompt or run ssh ${target} once in Terminal to review and trust the host key, then reconnect.`;
   }
-  return "If this is a first-time connection, run ssh in Terminal once to review and trust the host key, then reconnect.";
+  return "If this is a first-time connection, use the LLM Space host identity prompt or run ssh in Terminal once to review and trust the host key, then reconnect.";
 }
 
 function _hostKeyImpact(stage: SshBootstrapStage): string {

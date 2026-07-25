@@ -96,6 +96,10 @@ export function createMainWindowRPC({
           remoteServerManager.removeServer(serverId),
         remoteConnectServer: ({ serverId }) =>
           remoteServerManager.connectServer(serverId),
+        remoteTrustServerHostKey: ({ serverId, requestId }) =>
+          remoteServerManager.trustServerHostKey(serverId, requestId),
+        remoteRejectServerHostKey: ({ serverId, requestId }) =>
+          remoteServerManager.rejectServerHostKey(serverId, requestId),
         remoteDisconnectServer: ({ serverId }) =>
           remoteServerManager.disconnectServer(serverId),
         remoteSetDefaultRuntime: ({ runtimeId }) =>

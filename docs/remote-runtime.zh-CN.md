@@ -73,13 +73,29 @@ LLM Space 在检测平台和准备 runtime 时可能会调用多次短 `ssh` 命
 
 ## Host key 校验失败
 
-OpenSSH 会阻止你连接身份发生变化的主机。如果 LLM Space 报 SSH host key verification failed，不要直接删除 `known_hosts`。
+OpenSSH 会阻止你连接身份未知或身份发生变化的主机。LLM Space 会把这两类情况分开处理。
+
+首次连接某个 Host alias 或 IP 时，LLM Space 会展示主机 key type 和 SHA256 fingerprint。只有当你确认该 fingerprint 属于目标服务器后，才点击 **Trust and continue**。确认后，LLM Space 会把该 host key 写入 OpenSSH 的 `known_hosts`，后续连接会静默通过。
+
+如果 LLM Space 报 SSH host key changed，不要直接删除 `known_hosts`，也不要寻找 “ignore host key”。这可能只是服务器重装或 IP 复用，也可能是真实的中间人攻击。
 
 先向基础设施提供方或管理员确认主机身份。确认变更是预期行为之后，再按 OpenSSH 提示更新对应行，例如：
 
 ```text
 /Users/bytedance/.ssh/known_hosts line 6
 ```
+
+在 changed-key 弹窗中，LLM Space 会展示新的 fingerprint、`known_hosts` 文件和 offending line。只有勾选已确认主机身份后，才允许替换旧记录并继续连接。
+
+常用诊断命令：
+
+```sh
+ssh -vvv llm-devbox
+ssh -G llm-devbox
+ssh-keygen -F llm-devbox -f ~/.ssh/known_hosts
+```
+
+如果 LLM Space 无法自动写入或替换 `known_hosts`，请在 Terminal 中执行一次 `ssh llm-devbox` 完成 OpenSSH 的标准确认流程；changed-key 场景请先确认主机身份，再按 OpenSSH 提示处理 stale entry。
 
 LLM Space 不提供 “ignore host key” 按钮，因为绕过 host key 校验可能掩盖真实的中间人攻击。
 

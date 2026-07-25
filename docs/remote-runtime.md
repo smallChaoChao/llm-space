@@ -73,13 +73,29 @@ If the connection fails, the Remote Servers page keeps the last stage and the er
 
 ## Host key verification failures
 
-OpenSSH protects you from connecting to a host whose identity changed. If LLM Space reports an SSH host key verification failure, do not blindly delete `known_hosts`.
+OpenSSH protects you from connecting to a host whose identity is unknown or changed. LLM Space handles those cases separately.
+
+On the first connection to a Host alias or IP, LLM Space shows the host key type and SHA256 fingerprint. Click **Trust and continue** only after you confirm that the fingerprint belongs to the expected server. After confirmation, LLM Space writes the host key to OpenSSH `known_hosts`, so later connections can proceed silently.
+
+If LLM Space reports that the SSH host key changed, do not blindly delete `known_hosts`, and do not look for an “ignore host key” bypass. The server may have been rebuilt, the IP may have been reused, or a real man-in-the-middle attack may be happening.
 
 First confirm the host identity with your infrastructure provider or administrator. After you know the change is expected, update the line reported by OpenSSH, for example:
 
 ```text
 /Users/bytedance/.ssh/known_hosts line 6
 ```
+
+In the changed-key dialog, LLM Space shows the new fingerprint, the `known_hosts` file, and the offending line. Only after you check that you verified the host identity can LLM Space replace the stale entry and continue.
+
+Useful diagnostic commands:
+
+```sh
+ssh -vvv llm-devbox
+ssh -G llm-devbox
+ssh-keygen -F llm-devbox -f ~/.ssh/known_hosts
+```
+
+If LLM Space cannot write or replace `known_hosts` automatically, run `ssh llm-devbox` in Terminal once and complete OpenSSH's standard confirmation flow. In changed-key cases, verify the host identity first, then handle the stale entry reported by OpenSSH.
 
 LLM Space does not provide an “ignore host key” button because bypassing host key verification can hide a real man-in-the-middle attack.
 

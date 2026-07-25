@@ -8,6 +8,7 @@ import { RuntimeRouter } from "@llm-space/runtime/runtime";
 
 import { RemoteServerManager } from "./remote-server-manager";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
+import type { SshHostKeyService } from "./ssh-host-key";
 
 type StartSshRemoteRuntime = ConstructorParameters<
   typeof RemoteServerManager
@@ -40,14 +41,23 @@ function _remoteRuntime(id: SshRemoteRuntimeConfig["id"]): RuntimeClient {
 function _manager(
   start: StartSshRemoteRuntime,
   home = mkdtempSync(path.join(tmpdir(), "llm-space-remote-manager-test-")),
-  onStatusChanged?: ConstructorParameters<typeof RemoteServerManager>[2]
+  onStatusChanged?: ConstructorParameters<typeof RemoteServerManager>[2],
+  hostKeyService: SshHostKeyService = _trustedHostKeyService()
 ): RemoteServerManager {
   process.env.LLM_SPACE_HOME = home;
   return new RemoteServerManager(
     new RuntimeRouter(_localRuntime()),
     start,
-    onStatusChanged
+    onStatusChanged,
+    hostKeyService
   );
+}
+
+function _trustedHostKeyService(): SshHostKeyService {
+  return {
+    check: () => Promise.resolve({ status: "trusted" }),
+    trust: () => Promise.resolve(),
+  };
 }
 
 describe("RemoteServerManager", () => {
@@ -290,5 +300,146 @@ describe("RemoteServerManager", () => {
     expect(stages).toContain("health-check");
     expect(stages).toContain("connected");
     expect(next[0]?.stageLabel).toBe("Connected");
+  });
+
+  test("pauses first-time hosts until the user trusts the key", async () => {
+    let startCount = 0;
+    let trusted = false;
+    const manager = _manager(
+      (config) => {
+        startCount += 1;
+        return Promise.resolve({
+          client: _remoteRuntime(config.id),
+          stop: () => Promise.resolve(),
+        });
+      },
+      undefined,
+      undefined,
+      {
+        check: () =>
+          Promise.resolve(
+            trusted
+              ? { status: "trusted" }
+              : {
+                  status: "first-time",
+                  request: {
+                    requestId: "trust-1",
+                    kind: "first-time",
+                    target: "user@host",
+                    host: "host",
+                    user: "user",
+                    keyType: "ssh-ed25519",
+                    fingerprint: "SHA256:test",
+                    publicKeyLine: "host ssh-ed25519 AAAA",
+                  },
+                }
+          ),
+        trust: () => {
+          trusted = true;
+          return Promise.resolve();
+        },
+      }
+    );
+
+    const [server] = manager.addServer({
+      name: "host",
+      host: "host",
+      user: "user",
+    });
+    const waiting = await manager.connectServer(server.id);
+
+    expect(startCount).toBe(0);
+    expect(waiting[0]?.status).toBe("trust-required");
+    expect(waiting[0]?.trustRequest).toMatchObject({
+      kind: "first-time",
+      fingerprint: "SHA256:test",
+    });
+
+    const connected = await manager.trustServerHostKey(server.id, "trust-1");
+
+    expect(startCount).toBe(1);
+    expect(connected[0]?.status).toBe("connected");
+  });
+
+  test("rejecting a changed host key does not start ssh runtime", async () => {
+    let startCount = 0;
+    let trustCount = 0;
+    const manager = _manager(
+      (config) => {
+        startCount += 1;
+        return Promise.resolve({
+          client: _remoteRuntime(config.id),
+          stop: () => Promise.resolve(),
+        });
+      },
+      undefined,
+      undefined,
+      {
+        check: () =>
+          Promise.resolve({
+            status: "changed",
+            request: {
+              requestId: "changed-1",
+              kind: "changed",
+              target: "host",
+              host: "host",
+              keyType: "ecdsa-sha2-nistp256",
+              fingerprint: "SHA256:changed",
+              knownHostsFile: "/Users/bytedance/.ssh/known_hosts",
+              knownHostsLine: 6,
+              publicKeyLine: "host ecdsa-sha2-nistp256 AAAA",
+            },
+          }),
+        trust: () => {
+          trustCount += 1;
+          return Promise.resolve();
+        },
+      }
+    );
+
+    const [server] = manager.addServer({ name: "host", host: "host" });
+    const waiting = await manager.connectServer(server.id);
+    const rejected = await manager.rejectServerHostKey(server.id, "changed-1");
+
+    expect(waiting[0]?.status).toBe("trust-required");
+    expect(waiting[0]?.trustRequest?.kind).toBe("changed");
+    expect(rejected[0]?.status).toBe("disconnected");
+    expect(startCount).toBe(0);
+    expect(trustCount).toBe(0);
+  });
+
+  test("does not allow editing while waiting for host key trust", async () => {
+    const manager = _manager(
+      (config) =>
+        Promise.resolve({
+          client: _remoteRuntime(config.id),
+          stop: () => Promise.resolve(),
+        }),
+      undefined,
+      undefined,
+      {
+        check: () =>
+          Promise.resolve({
+            status: "first-time",
+            request: {
+              requestId: "trust-1",
+              kind: "first-time",
+              target: "host",
+              host: "host",
+              keyType: "ssh-ed25519",
+              fingerprint: "SHA256:test",
+              publicKeyLine: "host ssh-ed25519 AAAA",
+            },
+          }),
+        trust: () => Promise.resolve(),
+      }
+    );
+
+    const [server] = manager.addServer({ name: "host", host: "host" });
+    await manager.connectServer(server.id);
+
+    expect(() =>
+      manager.updateServer(server.id, { name: "changed", host: "other" })
+    ).toThrow("Disconnect remote server before update");
   });
 });

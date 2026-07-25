@@ -92,6 +92,14 @@ export interface DesktopRPCType {
         params: { serverId: string };
         response: RemoteServerView[];
       };
+      remoteTrustServerHostKey: {
+        params: { serverId: string; requestId: string };
+        response: RemoteServerView[];
+      };
+      remoteRejectServerHostKey: {
+        params: { serverId: string; requestId: string };
+        response: RemoteServerView[];
+      };
       remoteDisconnectServer: {
         params: { serverId: string };
         response: RemoteServerView[];

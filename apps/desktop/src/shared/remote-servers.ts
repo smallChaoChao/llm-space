@@ -19,6 +19,7 @@ export interface RemoteServerConfig extends RemoteServerDraft {
 export type RemoteConnectionStage =
   | "idle"
   | "ssh-check"
+  | "host-key-check"
   | "platform-detect"
   | "server-install"
   | "server-start"
@@ -27,13 +28,35 @@ export type RemoteConnectionStage =
   | "connected"
   | "error";
 
+export interface RemoteHostKeyTrustRequest {
+  requestId: string;
+  kind: "first-time" | "changed";
+  target: string;
+  host: string;
+  resolvedHost?: string;
+  port?: number;
+  user?: string;
+  keyType: string;
+  fingerprint: string;
+  knownHostsFile?: string;
+  knownHostsLine?: number;
+  publicKeyLine?: string;
+  rawOutput?: string;
+}
+
 export interface RemoteServerView extends RemoteServerConfig {
   runtimeId: RuntimeId;
-  status: "connected" | "connecting" | "disconnected" | "error";
+  status:
+    | "connected"
+    | "connecting"
+    | "disconnected"
+    | "error"
+    | "trust-required";
   defaultRuntime: boolean;
   stage?: RemoteConnectionStage;
   stageLabel?: string;
   statusUpdatedAt?: number;
+  trustRequest?: RemoteHostKeyTrustRequest;
   error?: string;
 }
 
