@@ -53,6 +53,10 @@ export function serverPackageAssetUrl(input: {
   return `https://github.com/${ownerRepo}/releases/download/v${input.target.version}/${assetName}`;
 }
 
+export function serverPackageChecksumUrl(assetUrl: string): string {
+  return `${assetUrl}.sha256`;
+}
+
 export function expectedProtocolVersion(): number {
   return REMOTE_RUNTIME_PROTOCOL_VERSION;
 }

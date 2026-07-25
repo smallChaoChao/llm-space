@@ -87,10 +87,14 @@ LLM Space does not provide an “ignore host key” button because bypassing hos
 
 If progress reaches **Downloading remote runtime package** and then fails with a server-install timeout, SSH is already working. The remote Linux machine could not download the `llm-space-server` release archive in time.
 
+Newer LLM Space builds use a two-step install path automatically: first the remote server tries to download the GitHub release archive directly; if that remote download fails, the Desktop app downloads the same archive locally, caches it under the local settings directory, uploads it over SSH to the remote runtime downloads directory, and continues installation from that uploaded archive.
+
 Check from your Mac:
 
 ```sh
 ssh llm-devbox 'curl -I -L --connect-timeout 15 https://github.com/deer-flow/llm-space/releases/latest'
 ```
 
-If that hangs or fails, fix network access on the remote machine: configure the remote shell's `HTTPS_PROXY`/`HTTP_PROXY`, allow GitHub release downloads, or use a network/mirror that the remote server can reach. Download speed is determined by the remote machine, not by the Mac running the desktop app.
+If that hangs or fails but LLM Space still connects successfully, the local download/upload fallback worked.
+
+If the fallback still fails, use the error detail to identify the next boundary: local GitHub download failures require fixing the Desktop machine's network or proxy; upload failures usually mean SSH cannot write to the remote install directory; remote install failures usually mean missing `tar`, low disk space, or permissions under `~/.llm-space/remote-runtime`.

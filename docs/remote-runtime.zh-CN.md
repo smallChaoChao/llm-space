@@ -87,10 +87,14 @@ LLM Space 不提供 “ignore host key” 按钮，因为绕过 host key 校验�
 
 如果进度到 **Downloading remote runtime package** 后报 server-install timeout，说明 SSH 已经通了。失败点是远端 Linux 机器没有在限定时间内下载完 `llm-space-server` release 包。
 
+新版 LLM Space 会自动走二段式安装：先让远端服务器直接下载 GitHub release 包；如果远端下载失败，会改为在运行 Desktop 的本机下载同一个包，缓存到本机 settings 目录，再通过 SSH 上传到远端的 runtime downloads 目录并继续安装。
+
 在 Mac 上这样检查远端网络：
 
 ```sh
 ssh llm-devbox 'curl -I -L --connect-timeout 15 https://github.com/deer-flow/llm-space/releases/latest'
 ```
 
-如果该命令卡住或失败，需要修远端机器的网络：给远端 shell 配置 `HTTPS_PROXY`/`HTTP_PROXY`，放通 GitHub release 下载，或使用远端能访问的网络/镜像。下载速度取决于远端机器，不取决于运行桌面 app 的 Mac。
+如果该命令卡住或失败，但 LLM Space 仍然连接成功，说明本地下载上传 fallback 生效了。
+
+如果 fallback 后仍失败，按错误详情区分：本地无法访问 GitHub 时，修运行 Desktop 这台机器的网络或代理；上传失败时，检查 SSH 是否允许写入远端安装目录；远端安装失败时，检查远端磁盘空间、`tar` 是否可用，以及 `~/.llm-space/remote-runtime` 权限。

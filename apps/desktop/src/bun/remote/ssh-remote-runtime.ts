@@ -4,11 +4,13 @@ import { REMOTE_RUNTIME_PROTOCOL_VERSION } from "@llm-space/runtime/remote-proto
 
 import { findFreePort } from "./port";
 import { spawnManagedProcess, type ManagedProcess } from "./process-utils";
+import { uploadRemoteFile } from "./remote-file-transfer";
 import { RemoteRuntimeClient } from "./remote-runtime-client";
 import {
   installRemoteServerPackage,
   RemoteServerInstallError,
 } from "./remote-server-installer";
+import { getOrDownloadServerPackage } from "./server-package-cache";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import {
   buildRemoteServerArgs,
@@ -50,6 +52,30 @@ export async function startSshRemoteRuntime(
     try {
       install = await installRemoteServerPackage(config, undefined, {
         onProgress: options.onProgress,
+        packageUploader: {
+          upload: async ({
+            config: sshConfig,
+            assetName,
+            assetUrl,
+            checksumUrl,
+            remoteArchivePath,
+          }) => {
+            const localPackage = await getOrDownloadServerPackage({
+              assetName,
+              assetUrl,
+              checksumUrl,
+            });
+            options.onProgress?.({
+              stage: "server-install",
+              message: "Uploading remote runtime package over SSH",
+            });
+            await uploadRemoteFile({
+              config: sshConfig,
+              localPath: localPackage.path,
+              remotePath: remoteArchivePath,
+            });
+          },
+        },
       });
     } catch (error) {
       throw new Error(

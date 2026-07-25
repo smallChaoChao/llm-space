@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildInstallFromArchiveCommand,
   buildInstallCommand,
   installRemoteServerPackage,
 } from "./remote-server-installer";
@@ -68,6 +69,21 @@ describe("remote server installer", () => {
     expect(command).not.toContain("/home/user/.llm-space-server");
   });
 
+  test("builds install-from-archive command without network access", () => {
+    const command = buildInstallFromArchiveCommand({
+      installDir: "/opt/llm space/it's",
+      version: "4.2.0",
+      assetName: "llm-space-server-4.2.0-linux-x64.tar.gz",
+      packageDir: "/opt/llm space/it's/versions/4.2.0",
+    });
+
+    expect(command).toContain("test -f \"$ARCHIVE\"");
+    expect(command).toContain("tar -xzf \"$ARCHIVE\"");
+    expect(command).not.toContain("curl");
+    expect(command).not.toContain("wget");
+    expect(command).not.toContain("ASSET_URL");
+  });
+
   test("describes package download timeouts with remote network probe", async () => {
     const promise = installRemoteServerPackage(CONFIG, (_config, command, timeoutMs) => {
       if (command.includes("uname")) {
@@ -126,8 +142,111 @@ describe("remote server installer", () => {
       expect(urlIndex).toBeGreaterThanOrEqual(0);
       expect(outputIndex).toBeGreaterThan(urlIndex);
       expect(message).toContain(
-        "llm-space-server-4.4.6-beta.3-linux-arm64.tar.gz"
+        `llm-space-server-${currentDesktopVersion()}-linux-arm64.tar.gz`
       );
+    }
+  });
+
+  test("falls back to local package upload when remote download fails", async () => {
+    const commands: string[] = [];
+    const uploads: string[] = [];
+    let manifestInstalled = false;
+    const result = await installRemoteServerPackage(
+      CONFIG,
+      (_config, command) => {
+        commands.push(command);
+        if (command.includes("uname")) {
+          return Promise.resolve({ stdout: "Linux\nx86_64\n", stderr: "" });
+        }
+        if (command.startsWith("cat ")) {
+          if (!manifestInstalled) {
+            return Promise.reject(new Error("missing manifest"));
+          }
+          return Promise.resolve({
+            stdout: JSON.stringify({
+              name: "llm-space-server",
+              version: currentDesktopVersion(),
+              protocolVersion: 1,
+              os: "linux",
+              arch: "x64",
+              entrypoint: "bin/llm-space-server",
+              createdAt: "2026-07-21T00:00:00.000Z",
+            }),
+            stderr: "",
+          });
+        }
+        if (command.includes("curl -fL")) {
+          return Promise.reject(
+            new Error("Remote command failed with exit code 28: curl timeout")
+          );
+        }
+        if (command.includes("test -f \"$ARCHIVE\"")) {
+          manifestInstalled = true;
+          return Promise.resolve({ stdout: "", stderr: "" });
+        }
+        if (command.includes("ln -sfn")) {
+          return Promise.resolve({ stdout: "", stderr: "" });
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+      {
+        packageUploader: {
+          upload: (input) => {
+            uploads.push(input.remoteArchivePath);
+            return Promise.resolve();
+          },
+        },
+      }
+    );
+
+    expect(result.entrypoint).toBe(
+      `/opt/llm space/runtime/versions/${currentDesktopVersion()}/bin/llm-space-server`
+    );
+    expect(uploads).toEqual([
+      `/opt/llm space/runtime/downloads/llm-space-server-${currentDesktopVersion()}-linux-x64.tar.gz`,
+    ]);
+    expect(commands.some((command) => command.includes("curl -fL"))).toBe(true);
+    expect(
+      commands.some(
+        (command) =>
+          command.includes("test -f \"$ARCHIVE\"") && !command.includes("curl -fL")
+      )
+    ).toBe(true);
+  });
+
+  test("reports both remote download and local fallback failures", async () => {
+    const promise = installRemoteServerPackage(
+      CONFIG,
+      (_config, command) => {
+        if (command.includes("uname")) {
+          return Promise.resolve({ stdout: "Linux\nx86_64\n", stderr: "" });
+        }
+        if (command.startsWith("cat ")) {
+          return Promise.reject(new Error("missing manifest"));
+        }
+        if (command.includes("curl -fL")) {
+          return Promise.reject(
+            new Error("Remote command failed with exit code 28: curl timeout")
+          );
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+      {
+        packageUploader: {
+          upload: () => Promise.reject(new Error("upload denied")),
+        },
+      }
+    );
+
+    try {
+      await promise;
+      throw new Error("install should fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain("Remote download failed");
+      expect(message).toContain("Local package upload failure");
+      expect(message).toContain("upload denied");
     }
   });
 });
