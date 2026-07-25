@@ -1,6 +1,6 @@
 {
   "name": "@llm-space/server",
-  "version": "4.4.6-beta.9",
+  "version": "4.4.6-beta.10",
   "type": "module",
   "private": true,
   "scripts": {
