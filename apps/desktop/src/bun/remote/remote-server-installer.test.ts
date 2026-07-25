@@ -91,7 +91,42 @@ describe("remote server installer", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toMatch(
+        /Remote runtime package download timed out after 300000ms\. Package URL: https:\/\/github\.com\/deer-flow\/llm-space\/releases\/download\//
+      );
+      expect((error as Error).message).toMatch(
         /Remote runtime package download timed out after 300000ms\..*Check remote network access with: ssh host/s
+      );
+    }
+  });
+
+  test("puts package URL before verbose remote command output", async () => {
+    const promise = installRemoteServerPackage(CONFIG, (_config, command) => {
+      if (command.includes("uname")) {
+        return Promise.resolve({ stdout: "Linux\naarch64\n", stderr: "" });
+      }
+      if (command.startsWith("cat ")) {
+        return Promise.reject(new Error("missing manifest"));
+      }
+      if (command.includes("curl -fL")) {
+        return Promise.reject(
+          new Error("Remote command failed with exit code 28: % Total noisy curl progress")
+        );
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    try {
+      await promise;
+      throw new Error("install should fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      const urlIndex = message.indexOf("Package URL:");
+      const outputIndex = message.indexOf("Remote command failed with exit code 28");
+      expect(urlIndex).toBeGreaterThanOrEqual(0);
+      expect(outputIndex).toBeGreaterThan(urlIndex);
+      expect(message).toContain(
+        "llm-space-server-4.4.6-beta.3-linux-arm64.tar.gz"
       );
     }
   });

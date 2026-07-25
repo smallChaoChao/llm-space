@@ -180,14 +180,15 @@ function _formatInstallFailure(
   if (/timed out after \d+ms/i.test(message)) {
     return [
       `Remote runtime package download timed out after ${input.timeoutMs}ms.`,
+      `Package URL: ${input.assetUrl}`,
       `LLM Space can reach the SSH server, but the server did not finish downloading ${input.assetName}.`,
       `Check remote network access with: ${probeCommand}`,
       "If GitHub is blocked or slow on the remote server, configure the remote server's proxy for curl/wget or use a mirrored release asset URL.",
     ].join(" ");
   }
   return [
-    message,
     `Package URL: ${input.assetUrl}`,
+    message,
     `Check remote network access with: ${probeCommand}`,
   ].join(" ");
 }
