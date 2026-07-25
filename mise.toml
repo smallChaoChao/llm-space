@@ -84,6 +84,10 @@ run = "bun run release"
 description = "Cut a canary prerelease"
 run = "bun run release:canary"
 
+[tasks."release:beta"]
+description = "Cut a beta prerelease from the current branch"
+run = "bun run release:beta"
+
 # --- Local packaging (see AGENTS.md "Releases & auto-update") ---------------
 
 [tasks.pack]

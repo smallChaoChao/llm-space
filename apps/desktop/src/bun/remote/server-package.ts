@@ -6,6 +6,8 @@ import { REMOTE_RUNTIME_PROTOCOL_VERSION } from "@llm-space/runtime/remote-proto
 
 import desktopPackageJson from "../../../package.json";
 
+import { SERVER_PACKAGE_BASE_URL } from "./release-source";
+
 export const SERVER_PACKAGE_NAME = "llm-space-server";
 export const DEFAULT_REMOTE_INSTALL_DIR = "~/.llm-space/remote-runtime";
 export const REQUIRED_REMOTE_CAPABILITIES = [
@@ -40,7 +42,10 @@ export function serverPackageAssetUrl(input: {
   target: ServerPackageTarget;
 }): string {
   const assetName = serverPackageAssetName(input.target);
-  const baseUrl = input.baseUrl?.replace(/\/+$/, "");
+  const baseUrl = (input.baseUrl ?? SERVER_PACKAGE_BASE_URL)?.replace(
+    /\/+$/,
+    ""
+  );
   if (baseUrl) {
     return `${baseUrl}/${assetName}`;
   }

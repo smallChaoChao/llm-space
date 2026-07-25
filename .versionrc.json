@@ -1,6 +1,9 @@
 {
   "packageFiles": [{ "filename": "apps/desktop/package.json", "type": "json" }],
-  "bumpFiles": [{ "filename": "apps/desktop/package.json", "type": "json" }],
+  "bumpFiles": [
+    { "filename": "apps/desktop/package.json", "type": "json" },
+    { "filename": "apps/server/package.json", "type": "json" }
+  ],
   "tagPrefix": "v",
   "skip": { "changelog": true }
 }
