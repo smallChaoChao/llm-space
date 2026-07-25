@@ -69,7 +69,9 @@ During Connect, LLM Space reports the main stages:
 6. Verifying the remote runtime
 7. Connected
 
-If the connection fails, the Remote Servers page keeps the last stage and the error message so you can tell whether the failure happened during SSH authentication, install, tunnel creation, or runtime health check.
+The Remote Servers page also shows a **Connection flow** timeline with SSH, Host key, Platform, Install runtime, Start server, Tunnel, and Health check. If the connection fails, the failed step keeps its detailed message so you can tell whether the failure happened during SSH authentication, package installation, server startup, tunnel creation, or runtime health check.
+
+Before reusing an installed remote runtime package, LLM Space verifies both `server-manifest.json` and the executable `bin/llm-space-server`. If a previous install left a partial version directory where the manifest exists but the binary is missing or not executable, the next connection treats it as incomplete and reinstalls that version automatically.
 
 ## Host key verification failures
 

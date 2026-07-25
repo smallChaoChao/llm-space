@@ -8,6 +8,7 @@ import type {
 import {
   remoteConnectionChecked,
   remoteConnectionDisabled,
+  remoteConnectionFlow,
   remoteStageSummary,
 } from "./remote-server-display";
 
@@ -78,5 +79,20 @@ describe("remote server display helpers", () => {
     expect(remoteConnectionDisabled(server({ status: "error" }), false)).toBe(
       false
     );
+  });
+
+  test("exposes connection flow steps from the server view", () => {
+    const steps = [
+      { stage: "ssh-check" as const, label: "SSH", status: "success" as const },
+      {
+        stage: "server-install" as const,
+        label: "Install runtime",
+        status: "error" as const,
+        message: "missing binary",
+      },
+    ];
+
+    expect(remoteConnectionFlow(server({ steps }))).toEqual(steps);
+    expect(remoteConnectionFlow(server({}))).toEqual([]);
   });
 });

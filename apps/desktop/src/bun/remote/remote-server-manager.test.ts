@@ -6,6 +6,8 @@ import path from "node:path";
 import type { RuntimeClient } from "@llm-space/runtime/runtime";
 import { RuntimeRouter } from "@llm-space/runtime/runtime";
 
+import type { RemoteServerView } from "../../shared/remote-servers";
+
 import { RemoteServerManager } from "./remote-server-manager";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import type { SshHostKeyService } from "./ssh-host-key";
@@ -260,8 +262,9 @@ describe("RemoteServerManager", () => {
 
   test("publishes connection progress stages", async () => {
     const stages: string[] = [];
+    let lastSteps: string[] = [];
     const manager = _manager(
-      (config, options) => {
+      (_config, options) => {
         options?.onProgress?.({
           stage: "server-install",
           message: "Downloading remote runtime package",
@@ -279,7 +282,7 @@ describe("RemoteServerManager", () => {
           message: "Verifying remote runtime",
         });
         return Promise.resolve({
-          client: _remoteRuntime(config.id),
+          client: _remoteRuntime(_config.id),
           stop: () => Promise.resolve(),
         });
       },
@@ -287,6 +290,8 @@ describe("RemoteServerManager", () => {
       ({ servers }) => {
         const stage = servers[0]?.stage;
         if (stage) stages.push(stage);
+        lastSteps =
+          servers[0]?.steps?.map((step) => `${step.stage}:${step.status}`) ?? [];
       }
     );
 
@@ -300,6 +305,42 @@ describe("RemoteServerManager", () => {
     expect(stages).toContain("health-check");
     expect(stages).toContain("connected");
     expect(next[0]?.stageLabel).toBe("Connected");
+    expect(lastSteps).toContain("server-install:success");
+    expect(lastSteps).toContain("connected:success");
+  });
+
+  test("marks the failing connection step", async () => {
+    let last: RemoteServerView | undefined;
+    const manager = _manager(
+      (_config, options) => {
+        options?.onProgress?.({
+          stage: "server-install",
+          message: "Installing package",
+        });
+        return Promise.reject(new Error("install failed"));
+      },
+      undefined,
+      ({ servers }) => {
+        last = servers[0];
+      }
+    );
+
+    const [server] = manager.addServer({ name: "host", host: "host" });
+    try {
+      await manager.connectServer(server.id);
+      throw new Error("connect should fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("install failed");
+    }
+
+    expect(
+      last?.steps?.find((step) => step.stage === "server-install")?.status
+    ).toBe("error");
+    expect(
+      last?.steps?.find((step) => step.stage === "server-install")?.message
+    ).toBe("install failed");
+    expect(last?.status).toBe("error");
   });
 
   test("pauses first-time hosts until the user trusts the key", async () => {

@@ -69,7 +69,9 @@ LLM Space 在检测平台和准备 runtime 时可能会调用多次短 `ssh` 命
 6. 验证远端 runtime
 7. 连接成功
 
-如果连接失败，Remote Servers 页面会保留最后阶段和错误信息，帮助判断失败发生在 SSH 认证、安装、隧道创建，还是 runtime 健康检查。
+Remote Servers 页面还会展示 **Connection flow** 时间线，包含 SSH、Host key、Platform、Install runtime、Start server、Tunnel 和 Health check。连接失败时，失败步骤会保留详细信息，帮助判断失败发生在 SSH 认证、包安装、server 启动、隧道创建，还是 runtime 健康检查。
+
+复用已安装的远端 runtime 包之前，LLM Space 会同时校验 `server-manifest.json` 和可执行文件 `bin/llm-space-server`。如果之前安装留下了残缺版本目录，例如 manifest 存在但二进制缺失或不可执行，下一次连接会把它视为未完整安装并自动重新安装该版本。
 
 ## Host key 校验失败
 

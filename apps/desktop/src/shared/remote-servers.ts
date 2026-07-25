@@ -28,6 +28,20 @@ export type RemoteConnectionStage =
   | "connected"
   | "error";
 
+export type RemoteConnectionStepStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "error";
+
+export interface RemoteConnectionStepView {
+  stage: RemoteConnectionStage;
+  label: string;
+  status: RemoteConnectionStepStatus;
+  message?: string;
+  updatedAt?: number;
+}
+
 export interface RemoteHostKeyTrustRequest {
   requestId: string;
   kind: "first-time" | "changed";
@@ -56,6 +70,7 @@ export interface RemoteServerView extends RemoteServerConfig {
   stage?: RemoteConnectionStage;
   stageLabel?: string;
   statusUpdatedAt?: number;
+  steps?: RemoteConnectionStepView[];
   trustRequest?: RemoteHostKeyTrustRequest;
   error?: string;
 }

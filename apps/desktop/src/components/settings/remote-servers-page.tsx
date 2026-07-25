@@ -14,12 +14,15 @@ import { Input } from "@llm-space/ui/ui/input";
 import { Separator } from "@llm-space/ui/ui/separator";
 import { Switch } from "@llm-space/ui/ui/switch";
 import {
+  Check,
+  Circle,
   ShieldAlert,
   Loader2,
   Plus,
   RefreshCw,
   Server,
   Trash2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -45,6 +48,7 @@ import type { RuntimeId } from "@/shared/runtime";
 import {
   remoteConnectionChecked,
   remoteConnectionDisabled,
+  remoteConnectionFlow,
   remoteStageSummary,
 } from "./remote-server-display";
 import { SettingsPage } from "./settings-page";
@@ -161,7 +165,14 @@ export function RemoteServersPage({
         onDisconnected?.(previousRuntimeId);
       }
     } catch (error) {
-      const failed = serversRef.current.find((server) => server.id === id);
+      let failed = serversRef.current.find((server) => server.id === id);
+      try {
+        const latest = await listRemoteServers();
+        updateServers(latest);
+        failed = latest.find((server) => server.id === id) ?? failed;
+      } catch {
+        // Keep the best-known local snapshot for the toast title.
+      }
       toast.error(_failureTitle(failed), {
         description:
           error instanceof Error ? error.message : "Please try again.",
@@ -410,6 +421,7 @@ function RemoteServerDetails({
         <Info label="Runtime" value={server.runtimeId} />
         <Info label="Workspace" value={_remoteWorkspacePath(server)} />
       </div>
+      <ConnectionFlow server={server} />
       {server.error ? (
         <p className="text-destructive text-sm">{server.error}</p>
       ) : null}
@@ -437,6 +449,54 @@ function RemoteServerDetails({
       ) : null}
     </div>
   );
+}
+
+function ConnectionFlow({ server }: { server: RemoteServerView }) {
+  const steps = remoteConnectionFlow(server);
+  if (steps.length === 0) return null;
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="mb-2 text-sm font-medium">Connection flow</div>
+      <div className="grid gap-2">
+        {steps.map((step) => (
+          <div key={step.stage} className="grid gap-1 text-sm">
+            <div className="flex min-w-0 items-center gap-2">
+              <StepIcon status={step.status} />
+              <span className="min-w-0 grow truncate">{step.label}</span>
+              <span className="text-muted-foreground text-xs capitalize">
+                {step.status}
+              </span>
+            </div>
+            {step.message ? (
+              <div
+                className="text-muted-foreground ml-5 truncate text-xs"
+                title={step.message}
+              >
+                {step.message}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StepIcon({
+  status,
+}: {
+  status: NonNullable<RemoteServerView["steps"]>[number]["status"];
+}) {
+  if (status === "success") {
+    return <Check className="text-primary size-3.5 shrink-0" />;
+  }
+  if (status === "running") {
+    return <Loader2 className="text-primary size-3.5 shrink-0 animate-spin" />;
+  }
+  if (status === "error") {
+    return <X className="text-destructive size-3.5 shrink-0" />;
+  }
+  return <Circle className="text-muted-foreground size-3.5 shrink-0" />;
 }
 
 function SshHostKeyDialog({

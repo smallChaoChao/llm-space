@@ -11,6 +11,7 @@ import type {
 
 import type {
   RemoteConnectionStage,
+  RemoteConnectionStepView,
   RemoteHostKeyTrustRequest,
   RemoteServerConfig,
   RemoteServerDraft,
@@ -57,6 +58,7 @@ interface ConnectedServer {
   stage: RemoteConnectionStage;
   stageLabel: string;
   updatedAt: number;
+  steps: RemoteConnectionStepView[];
   handle?: RemoteRuntimeHandle;
   trustRequest?: RemoteHostKeyTrustRequest;
   error?: string;
@@ -183,9 +185,10 @@ export class RemoteServerManager {
       });
       return this.listServers();
     } catch (error) {
+      const failedStage = this._connections.get(id)?.stage ?? "error";
       this._setConnection(id, {
         status: "error",
-        stage: "error",
+        stage: failedStage,
         stageLabel: "Connection failed",
         error: error instanceof Error ? error.message : String(error),
       });
@@ -313,6 +316,7 @@ export class RemoteServerManager {
       ...(connection?.updatedAt
         ? { statusUpdatedAt: connection.updatedAt }
         : {}),
+      ...(connection?.steps ? { steps: connection.steps } : {}),
       ...(connection?.trustRequest
         ? { trustRequest: connection.trustRequest }
         : {}),
@@ -430,11 +434,26 @@ export class RemoteServerManager {
 
   private _setConnection(
     id: string,
-    next: Omit<ConnectedServer, "updatedAt"> & { updatedAt?: number }
+    next: Omit<ConnectedServer, "steps" | "updatedAt"> & {
+      updatedAt?: number;
+    }
   ): void {
+    const current = this._connections.get(id);
+    const updatedAt = next.updatedAt ?? Date.now();
     this._connections.set(id, {
       ...next,
-      updatedAt: next.updatedAt ?? Date.now(),
+      updatedAt,
+      steps: _updateConnectionSteps(current?.steps, {
+        stage: next.stage,
+        status:
+          next.status === "error"
+            ? "error"
+            : next.status === "connected"
+              ? "success"
+              : "running",
+        message: next.error ?? next.stageLabel,
+        updatedAt,
+      }),
     });
     this._emitStatusChanged();
   }
@@ -456,6 +475,70 @@ function _connectionStage(stage: string): RemoteConnectionStage {
     default:
       return "ssh-check";
   }
+}
+
+const CONNECTION_STEP_LABELS: Record<RemoteConnectionStage, string> = {
+  idle: "Idle",
+  "ssh-check": "Open SSH",
+  "host-key-check": "Host key",
+  "platform-detect": "Platform",
+  "server-install": "Install runtime",
+  "server-start": "Start server",
+  "tunnel-start": "Tunnel",
+  "health-check": "Health check",
+  connected: "Connected",
+  error: "Failed",
+};
+
+const CONNECTION_FLOW: RemoteConnectionStage[] = [
+  "ssh-check",
+  "host-key-check",
+  "platform-detect",
+  "server-install",
+  "server-start",
+  "tunnel-start",
+  "health-check",
+  "connected",
+];
+
+function _initialConnectionSteps(): RemoteConnectionStepView[] {
+  return CONNECTION_FLOW.map((stage) => ({
+    stage,
+    label: CONNECTION_STEP_LABELS[stage],
+    status: "pending",
+  }));
+}
+
+function _updateConnectionSteps(
+  current: RemoteConnectionStepView[] | undefined,
+  update: {
+    stage: RemoteConnectionStage;
+    status: RemoteConnectionStepView["status"];
+    message: string;
+    updatedAt: number;
+  }
+): RemoteConnectionStepView[] {
+  const steps = current?.length ? current : _initialConnectionSteps();
+  const index = steps.findIndex((step) => step.stage === update.stage);
+  return steps.map((step, stepIndex) => {
+    if (step.stage === update.stage) {
+      return {
+        ...step,
+        status: update.status,
+        message: update.message,
+        updatedAt: update.updatedAt,
+      };
+    }
+    if (update.status === "running" && index >= 0 && stepIndex < index) {
+      return step.status === "pending" || step.status === "running"
+        ? { ...step, status: "success", updatedAt: update.updatedAt }
+        : step;
+    }
+    if (update.stage === "connected" && step.status === "running") {
+      return { ...step, status: "success", updatedAt: update.updatedAt };
+    }
+    return step;
+  });
 }
 
 function _optional(value: string | undefined): string | undefined {

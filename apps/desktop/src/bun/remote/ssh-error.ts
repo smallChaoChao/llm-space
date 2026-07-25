@@ -22,6 +22,9 @@ export function formatSshBootstrapFailure({
   output,
   target,
 }: SshBootstrapFailureInput): string {
+  const missingRuntime = _formatMissingRuntimeBinary(output);
+  if (missingRuntime) return missingRuntime;
+
   const hostKeyFailure = _formatHostKeyFailure(output, target, stage);
   if (hostKeyFailure) return hostKeyFailure;
 
@@ -35,6 +38,18 @@ export function formatSshBootstrapFailure({
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function _formatMissingRuntimeBinary(output: string): string | null {
+  if (!/No such file or directory/i.test(output)) return null;
+  const match = /([^\s'":]+llm-space-server)/.exec(output);
+  if (!match) return null;
+  const path = match[1];
+  return [
+    "Remote runtime binary is missing.",
+    `${path} does not exist or is not executable on the SSH server.`,
+    "LLM Space will verify the remote runtime package and reinstall the version on the next connect.",
+  ].join(" ");
 }
 
 function _formatAuthenticationFailure(

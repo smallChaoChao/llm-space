@@ -45,6 +45,9 @@ describe("remote server installer", () => {
       if (command.includes("ln -sfn")) {
         return Promise.resolve({ stdout: "", stderr: "" });
       }
+      if (command.startsWith("test -x ")) {
+        return Promise.resolve({ stdout: "", stderr: "" });
+      }
       throw new Error(`unexpected command: ${command}`);
     });
 
@@ -52,6 +55,47 @@ describe("remote server installer", () => {
       `/opt/llm space/runtime/versions/${currentDesktopVersion()}/bin/llm-space-server`
     );
     expect(commands.some((command) => command.includes("curl -fL"))).toBe(false);
+  });
+
+  test("repairs matching manifests with a missing entrypoint", async () => {
+    const commands: string[] = [];
+    let manifestInstalled = false;
+    await installRemoteServerPackage(CONFIG, (_config, command) => {
+      commands.push(command);
+      if (command.includes("uname")) {
+        return Promise.resolve({ stdout: "Linux\nx86_64\n", stderr: "" });
+      }
+      if (command.startsWith("cat ")) {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            name: "llm-space-server",
+            version: currentDesktopVersion(),
+            protocolVersion: 1,
+            os: "linux",
+            arch: "x64",
+            entrypoint: "bin/llm-space-server",
+            createdAt: "2026-07-21T00:00:00.000Z",
+          }),
+          stderr: "",
+        });
+      }
+      if (command.startsWith("test -x ")) {
+        if (!manifestInstalled) {
+          return Promise.reject(new Error("missing entrypoint"));
+        }
+        return Promise.resolve({ stdout: "", stderr: "" });
+      }
+      if (command.includes("curl -fL")) {
+        manifestInstalled = true;
+        return Promise.resolve({ stdout: "", stderr: "" });
+      }
+      if (command.includes("ln -sfn")) {
+        return Promise.resolve({ stdout: "", stderr: "" });
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    expect(commands.some((command) => command.includes("curl -fL"))).toBe(true);
   });
 
   test("builds safely quoted install command", () => {
@@ -66,6 +110,9 @@ describe("remote server installer", () => {
     expect(command).toContain("https://example.test/a'\\''b.tar.gz");
     expect(command).toContain("--connect-timeout 15 --max-time 240");
     expect(command).toContain("--timeout=30 --tries=3");
+    expect(command).toContain('ARCHIVE_TMP="$ARCHIVE.tmp-$$"');
+    expect(command).toContain('sha256sum "$ARCHIVE_TMP"');
+    expect(command).toContain('mv "$ARCHIVE_TMP" "$ARCHIVE"');
     expect(command).not.toContain("/home/user/.llm-space-server");
   });
 
@@ -79,6 +126,13 @@ describe("remote server installer", () => {
 
     expect(command).toContain("test -f \"$ARCHIVE\"");
     expect(command).toContain("tar -xzf \"$ARCHIVE\"");
+    expect(command).toContain(
+      "test -x \"$TMP_PACKAGE/bin/llm-space-server\""
+    );
+    expect(command).toContain(
+      'if [ -e "$PACKAGE_DIR" ]; then mv "$PACKAGE_DIR" "$OLD_PACKAGE"; fi'
+    );
+    expect(command).not.toContain("rm -rf '/opt/llm space/it'\\''s/versions/4.2.0'");
     expect(command).not.toContain("curl");
     expect(command).not.toContain("wget");
     expect(command).not.toContain("ASSET_URL");
@@ -182,6 +236,9 @@ describe("remote server installer", () => {
         }
         if (command.includes("test -f \"$ARCHIVE\"")) {
           manifestInstalled = true;
+          return Promise.resolve({ stdout: "", stderr: "" });
+        }
+        if (command.startsWith("test -x ")) {
           return Promise.resolve({ stdout: "", stderr: "" });
         }
         if (command.includes("ln -sfn")) {

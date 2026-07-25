@@ -87,7 +87,16 @@ export async function installRemoteServerPackage(
   const remoteArchivePath = `${installDir}/downloads/${assetName}`;
   const entrypoint = `${packageDir}/bin/llm-space-server`;
 
-  if (await _hasInstalledPackage(config, run, manifestPath, version, platform)) {
+  if (
+    await _hasInstalledPackage(
+      config,
+      run,
+      manifestPath,
+      entrypoint,
+      version,
+      platform
+    )
+  ) {
     options.onProgress?.({
       stage: "server-install",
       message: "Remote runtime is already installed",
@@ -125,7 +134,16 @@ export async function installRemoteServerPackage(
     });
   }
 
-  if (!(await _hasInstalledPackage(config, run, manifestPath, version, platform))) {
+  if (
+    !(await _hasInstalledPackage(
+      config,
+      run,
+      manifestPath,
+      entrypoint,
+      version,
+      platform
+    ))
+  ) {
     throw new Error(`Remote server package install verification failed: ${assetName}`);
   }
   await _pointCurrentAtVersion(config, run, installDir, version);
@@ -166,10 +184,20 @@ export function buildDownloadAndInstallCommand(input: {
     `INSTALL_DIR=${installDir}`,
     `ASSET_NAME=${assetName}`,
     `ASSET_URL=${assetUrl}`,
+    'CHECKSUM_URL="$ASSET_URL.sha256"',
     'DOWNLOAD_DIR="$INSTALL_DIR/downloads"',
     'mkdir -p "$DOWNLOAD_DIR"',
     'ARCHIVE="$DOWNLOAD_DIR/$ASSET_NAME"',
-    'if command -v curl >/dev/null 2>&1; then curl -fL --connect-timeout 15 --max-time 240 --retry 2 --retry-delay 2 "$ASSET_URL" -o "$ARCHIVE"; elif command -v wget >/dev/null 2>&1; then wget --timeout=30 --tries=3 -O "$ARCHIVE" "$ASSET_URL"; else echo "curl or wget is required to download llm-space-server" >&2; exit 1; fi',
+    'ARCHIVE_TMP="$ARCHIVE.tmp-$$"',
+    'CHECKSUM_TMP="$ARCHIVE.sha256.tmp-$$"',
+    'rm -f "$ARCHIVE_TMP" "$CHECKSUM_TMP"',
+    'trap \'rm -f "$ARCHIVE_TMP" "$CHECKSUM_TMP"\' EXIT',
+    'if command -v curl >/dev/null 2>&1; then curl -fL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 "$CHECKSUM_URL" -o "$CHECKSUM_TMP" && curl -fL --connect-timeout 15 --max-time 240 --retry 2 --retry-delay 2 "$ASSET_URL" -o "$ARCHIVE_TMP"; elif command -v wget >/dev/null 2>&1; then wget --timeout=30 --tries=3 -O "$CHECKSUM_TMP" "$CHECKSUM_URL" && wget --timeout=30 --tries=3 -O "$ARCHIVE_TMP" "$ASSET_URL"; else echo "curl or wget is required to download llm-space-server" >&2; exit 1; fi',
+    'EXPECTED_SHA="$(awk \'{print $1}\' "$CHECKSUM_TMP")"',
+    'case "$EXPECTED_SHA" in [A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9]*) ;; *) echo "Invalid server package checksum" >&2; exit 1 ;; esac',
+    'ACTUAL_SHA="$(sha256sum "$ARCHIVE_TMP" | awk \'{print $1}\')"',
+    'test "$EXPECTED_SHA" = "$ACTUAL_SHA"',
+    'mv "$ARCHIVE_TMP" "$ARCHIVE"',
     buildInstallFromArchiveCommand(input),
   ].join(" && ");
 }
@@ -191,16 +219,21 @@ export function buildInstallFromArchiveCommand(input: {
     `ASSET_NAME=${assetName}`,
     'DOWNLOAD_DIR="$INSTALL_DIR/downloads"',
     'TMP_DIR="$INSTALL_DIR/.tmp-$VERSION-$$"',
+    'TMP_PACKAGE="$INSTALL_DIR/.pkg-$VERSION-$$"',
+    `PACKAGE_DIR=${packageDir}`,
+    'OLD_PACKAGE="$INSTALL_DIR/.old-$VERSION-$$"',
     'mkdir -p "$INSTALL_DIR/versions" "$DOWNLOAD_DIR"',
-    'rm -rf "$TMP_DIR"',
+    'rm -rf "$TMP_DIR" "$TMP_PACKAGE" "$OLD_PACKAGE"',
     'mkdir -p "$TMP_DIR"',
     'ARCHIVE="$DOWNLOAD_DIR/$ASSET_NAME"',
     'test -f "$ARCHIVE"',
     'tar -xzf "$ARCHIVE" -C "$TMP_DIR"',
     'EXTRACTED="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)"',
     'test -n "$EXTRACTED"',
-    `rm -rf ${packageDir}`,
-    `mv "$EXTRACTED" ${packageDir}`,
+    'mv "$EXTRACTED" "$TMP_PACKAGE"',
+    'test -x "$TMP_PACKAGE/bin/llm-space-server"',
+    'if [ -e "$PACKAGE_DIR" ]; then mv "$PACKAGE_DIR" "$OLD_PACKAGE"; fi',
+    'if mv "$TMP_PACKAGE" "$PACKAGE_DIR"; then rm -rf "$OLD_PACKAGE"; else if [ -e "$OLD_PACKAGE" ]; then mv "$OLD_PACKAGE" "$PACKAGE_DIR"; fi; exit 1; fi',
     'rm -rf "$TMP_DIR"',
     `ln -sfn ${shellQuote(`versions/${input.version}`)} "$INSTALL_DIR/current"`,
   ].join(" && ");
@@ -309,20 +342,23 @@ async function _hasInstalledPackage(
   config: SshRemoteRuntimeConfig,
   run: RemoteCommandRunner,
   manifestPath: string,
+  entrypoint: string,
   version: string,
   platform: { os: "linux"; arch: "x64" | "arm64" }
 ): Promise<boolean> {
   try {
     const result = await run(config, `cat ${shellQuote(manifestPath)}`, 10_000);
     const manifest = JSON.parse(result.stdout) as ServerPackageManifest;
-    return (
+    const manifestMatches =
       manifest.name === "llm-space-server" &&
       manifest.version === version &&
       manifest.protocolVersion === expectedProtocolVersion() &&
       manifest.os === platform.os &&
       manifest.arch === platform.arch &&
-      Boolean(manifest.entrypoint)
-    );
+      Boolean(manifest.entrypoint);
+    if (!manifestMatches) return false;
+    await run(config, `test -x ${shellQuote(entrypoint)}`, 10_000);
+    return true;
   } catch {
     return false;
   }

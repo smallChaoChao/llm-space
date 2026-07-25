@@ -1,5 +1,6 @@
 import type {
   RemoteConnectionStage,
+  RemoteConnectionStepView,
   RemoteServerView,
 } from "@/shared/remote-servers";
 
@@ -37,4 +38,10 @@ export function remoteConnectionDisabled(
     server.status === "connecting" ||
     server.status === "trust-required"
   );
+}
+
+export function remoteConnectionFlow(
+  server: RemoteServerView
+): RemoteConnectionStepView[] {
+  return server.steps ?? [];
 }

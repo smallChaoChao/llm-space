@@ -71,6 +71,22 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
     );
   });
 
+  test("classifies missing remote runtime binaries", () => {
+    const message = formatSshBootstrapFailure({
+      stage: "health-check",
+      label: "remote server",
+      output:
+        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server: No such file or directory",
+    });
+
+    expect(message).toContain("Remote runtime binary is missing");
+    expect(message).toContain(
+      "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server"
+    );
+    expect(message).toContain("reinstall the version on the next connect");
+    expect(message).not.toContain("health-check");
+  });
+
   test("classifies authentication failures", () => {
     const message = formatSshBootstrapFailure({
       stage: "server-install",
