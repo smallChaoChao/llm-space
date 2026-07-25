@@ -14,6 +14,8 @@ import { createFileSystemClient, traceClient } from "@/client";
 import { listRuntimes } from "@/client/remote-servers";
 import type { RuntimeId } from "@/shared/runtime";
 
+import { removeTabsForRuntime } from "./tab-runtime-scope";
+
 /** An open workspace thread tab. `id` is stable as `thread:{path}`. */
 export interface ThreadTab {
   id: string;
@@ -79,12 +81,20 @@ export interface ThreadTabs {
   close: (id: string) => void;
   /** Close every open tab except `keep`, which becomes active. */
   closeOthers: (keep: string) => void;
+  /** Close every open tab in the same runtime except `keep`, which becomes active. */
+  closeOthersInRuntime: (keep: string, runtimeId: RuntimeId) => void;
   /** Close every open tab and push the group onto the reopen stack. */
   closeAll: () => void;
+  /** Close every open tab in one runtime and push the group onto the reopen stack. */
+  closeAllInRuntime: (runtimeId: RuntimeId) => void;
   /** Close every open thread tab attached to a runtime. */
   closeRuntime: (runtimeId: RuntimeId) => void;
+  /** Drop every open tab attached to a runtime without adding it to reopen history. */
+  discardRuntime: (runtimeId: RuntimeId) => void;
   /** Move the tab at `from` to `to` within the visual tab order. */
   reorder: (from: number, to: number) => void;
+  /** Move tabs by indexes within one runtime's visible tab order. */
+  reorderInRuntime: (from: number, to: number, runtimeId: RuntimeId) => void;
   /** Focus an already-open tab by id. */
   activate: (id: string) => void;
   /** Focus the tab after the active one in visual order, wrapping around. */
@@ -233,6 +243,16 @@ function _savePersistedTabs(tabs: AppTab[]): void {
     LOCAL_STORAGE_KEYS.openAppTabs,
     JSON.stringify(tabs.map(_persistable))
   );
+}
+
+function _activeAfterRemovingTabs(
+  current: string | null,
+  next: AppTab[],
+  removed: AppTab[]
+): string | null {
+  return current !== null && removed.some((tab) => tab.id === current)
+    ? (next[next.length - 1]?.id ?? null)
+    : current;
 }
 
 function _loadPersistedActive(tabs: AppTab[]): string | null {
@@ -401,7 +421,10 @@ export function useThreadTabs(): ThreadTabs {
       setTabs((prev) =>
         prev.some((tab) => tab.id === id)
           ? prev
-          : [...prev, _createTraceTab({ projectId, traceKey, title, runtimeId })]
+          : [
+              ...prev,
+              _createTraceTab({ projectId, traceKey, title, runtimeId }),
+            ]
       );
       setActiveId(id);
     },
@@ -467,33 +490,71 @@ export function useThreadTabs(): ThreadTabs {
     [pushClosed]
   );
 
+  const closeOthersInRuntime = useCallback(
+    (keep: string, runtimeId: RuntimeId) => {
+      setTabs((prev) => {
+        const keepTab = prev.find((tab) => tab.id === keep);
+        if (keepTab?.runtimeId !== runtimeId) return prev;
+        const closed = prev.filter(
+          (tab) => tab.runtimeId === runtimeId && tab.id !== keep
+        );
+        if (closed.length === 0) return prev;
+        pushClosed(closed);
+        return prev.filter(
+          (tab) => tab.runtimeId !== runtimeId || tab.id === keep
+        );
+      });
+      setActiveId(keep);
+    },
+    [pushClosed]
+  );
+
   const closeAll = useCallback(() => {
     pushClosed(tabsRef.current);
     setTabs([]);
     setActiveId(null);
   }, [pushClosed]);
 
-  const closeRuntime = useCallback(
+  const closeAllInRuntime = useCallback(
     (runtimeId: RuntimeId) => {
       setTabs((prev) => {
-        const closed = prev.filter(
-          (tab) => tab.runtimeId === runtimeId
-        );
-        if (closed.length === 0) return prev;
-        const next = prev.filter(
-          (tab) => tab.runtimeId !== runtimeId
-        );
-        pushClosed(closed);
+        const { next, removed } = removeTabsForRuntime(prev, runtimeId);
+        if (removed.length === 0) return prev;
+        pushClosed(removed);
         setActiveId((current) =>
-          current !== null && closed.some((tab) => tab.id === current)
-            ? (next[next.length - 1]?.id ?? null)
-            : current
+          _activeAfterRemovingTabs(current, next, removed)
         );
         return next;
       });
     },
     [pushClosed]
   );
+
+  const closeRuntime = useCallback(
+    (runtimeId: RuntimeId) => {
+      setTabs((prev) => {
+        const { next, removed: closed } = removeTabsForRuntime(prev, runtimeId);
+        if (closed.length === 0) return prev;
+        pushClosed(closed);
+        setActiveId((current) =>
+          _activeAfterRemovingTabs(current, next, closed)
+        );
+        return next;
+      });
+    },
+    [pushClosed]
+  );
+
+  const discardRuntime = useCallback((runtimeId: RuntimeId) => {
+    setTabs((prev) => {
+      const { next, removed } = removeTabsForRuntime(prev, runtimeId);
+      if (removed.length === 0) return prev;
+      setActiveId((current) =>
+        _activeAfterRemovingTabs(current, next, removed)
+      );
+      return next;
+    });
+  }, []);
 
   const reopenClosed = useCallback(async () => {
     const group = closedStack.current.pop();
@@ -529,6 +590,31 @@ export function useThreadTabs(): ThreadTabs {
       return next;
     });
   }, []);
+
+  const reorderInRuntime = useCallback(
+    (from: number, to: number, runtimeId: RuntimeId) => {
+      setTabs((prev) => {
+        if (from === to || from < 0 || to < 0) return prev;
+        const scopedIndexes = prev
+          .map((tab, index) => ({ tab, index }))
+          .filter(({ tab }) => tab.runtimeId === runtimeId)
+          .map(({ index }) => index);
+        if (from >= scopedIndexes.length || to >= scopedIndexes.length) {
+          return prev;
+        }
+        const next = [...prev];
+        const [moved] = next.splice(scopedIndexes[from], 1) as [AppTab];
+        const nextScopedIndexes = next
+          .map((tab, index) => ({ tab, index }))
+          .filter(({ tab }) => tab.runtimeId === runtimeId)
+          .map(({ index }) => index);
+        const insertAt = nextScopedIndexes[to] ?? next.length;
+        next.splice(insertAt, 0, moved);
+        return next;
+      });
+    },
+    []
+  );
 
   const handleRemove = useCallback(
     (removed: string, runtimeId: RuntimeId = "local") => {
@@ -658,9 +744,13 @@ export function useThreadTabs(): ThreadTabs {
     openTrace,
     close,
     closeOthers,
+    closeOthersInRuntime,
     closeAll,
+    closeAllInRuntime,
     closeRuntime,
+    discardRuntime,
     reorder,
+    reorderInRuntime,
     activate,
     activateNext,
     activatePrevious,

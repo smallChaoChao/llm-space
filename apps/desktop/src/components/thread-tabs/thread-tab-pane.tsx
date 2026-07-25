@@ -64,18 +64,19 @@ export function ThreadTabPane({
     gcTime: 0,
     retry: false,
   });
+  const loadError = isError || (!isLoading && !thread);
 
   // The tab is opened optimistically (see `useThreadTabs.open`) without
   // pre-checking the file exists, so a since-deleted (or otherwise unreadable)
   // file surfaces here instead: report it and close the tab it was given.
   useEffect(() => {
-    if (!isError) return;
+    if (!loadError) return;
     toast.error("Error", {
       description:
         error instanceof Error ? error.message : `File not found: ${path}`,
     });
     onClose?.(path);
-  }, [isError, error, path, onClose]);
+  }, [loadError, error, path, onClose]);
 
   // Persist edits back to the same path, debounced so we don't write per keystroke.
   // `pending` holds the latest unsaved thread so we can flush it on unmount.
@@ -184,6 +185,19 @@ export function ThreadTabPane({
     },
     [flushPending, fs, onMove, qc, runtimeId]
   );
+
+  if (loadError) {
+    return (
+      <div
+        className={cn(
+          "bg-background text-muted-foreground flex size-full items-center justify-center text-sm",
+          !active && "hidden"
+        )}
+      >
+        Failed to load thread.
+      </div>
+    );
+  }
 
   return (
     <div className={cn("size-full", !active && "hidden")}>

@@ -43,7 +43,12 @@ import { GithubDeviceDialog } from "@/components/github-device-dialog";
 import { GithubStarReminder } from "@/components/github-star-reminder";
 import { RemoteStatus } from "@/components/remote-status";
 import { SharedImportProvider } from "@/components/shared-import-provider";
-import { ThreadTabs, useThreadTabs } from "@/components/thread-tabs";
+import {
+  chooseActiveTabForRuntime,
+  filterTabsForRuntime,
+  ThreadTabs,
+  useThreadTabs,
+} from "@/components/thread-tabs";
 import { UpdateIndicator } from "@/components/update-indicator";
 import { UpdateStatusProvider } from "@/components/update-status-provider";
 import { Welcome } from "@/components/welcome";
@@ -106,13 +111,7 @@ const LazyTracePanel = lazy(() =>
  * so the lazy `import()` starts in the same render that opens the overlay,
  * without a wasted extra render of the page tree.
  */
-function LazyMount({
-  open,
-  children,
-}: {
-  open: boolean;
-  children: ReactNode;
-}) {
+function LazyMount({ open, children }: { open: boolean; children: ReactNode }) {
   const mounted = useRef(false);
   if (open) mounted.current = true;
   if (!mounted.current) return null;
@@ -217,6 +216,15 @@ function writeSidebarSize(sizeInPixels: number): void {
   );
 }
 
+function clearRuntimeQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  runtimeId: RuntimeId
+): void {
+  void queryClient.removeQueries({ queryKey: ["thread", runtimeId] });
+  void queryClient.removeQueries({ queryKey: ["fs", runtimeId] });
+  void queryClient.removeQueries({ queryKey: ["trace", runtimeId] });
+}
+
 function threadTabId(path: string, runtimeId: RuntimeId): string {
   return `thread:${runtimeId}:${path}`;
 }
@@ -273,23 +281,63 @@ function PageWorkspace({
   const queryClient = useQueryClient();
   const { tracingEnabled } = useExperimental();
 
-  // The active tab is read through a ref so command handlers never go stale.
-  // The ref is read only inside post-commit command handlers, so the sync
-  // lives in a passive effect rather than the render body.
-  const activeTabIdRef = useRef(tabs.activeId);
-  useEffect(() => {
-    activeTabIdRef.current = tabs.activeId;
-  });
   const {
     close,
-    closeOthers,
-    closeAll,
-    closeRuntime,
+    closeAllInRuntime,
+    discardRuntime,
+    closeOthersInRuntime,
     openTrace,
     reopenClosed,
-    activateNext,
-    activatePrevious,
   } = tabs;
+  const visibleTabs = useMemo(
+    () => filterTabsForRuntime(tabs.tabs, workspaceRuntimeId),
+    [tabs.tabs, workspaceRuntimeId]
+  );
+  const visibleActiveId = useMemo(
+    () =>
+      chooseActiveTabForRuntime(tabs.tabs, tabs.activeId, workspaceRuntimeId),
+    [tabs.activeId, tabs.tabs, workspaceRuntimeId]
+  );
+  // The visible active tab is read through a ref so command handlers never go
+  // stale or accidentally target a tab from another runtime.
+  const activeTabIdRef = useRef(visibleActiveId);
+  useEffect(() => {
+    activeTabIdRef.current = visibleActiveId;
+  }, [visibleActiveId]);
+  const activateVisibleTab = useCallback(
+    (id: string) => {
+      if (visibleTabs.some((tab) => tab.id === id)) tabs.activate(id);
+    },
+    [tabs, visibleTabs]
+  );
+  const reorderVisibleTabs = useCallback(
+    (from: number, to: number) =>
+      tabs.reorderInRuntime(from, to, workspaceRuntimeId),
+    [tabs, workspaceRuntimeId]
+  );
+  const activateVisibleSibling = useCallback(
+    (offset: 1 | -1) => {
+      if (visibleTabs.length === 0) return;
+      const index = visibleTabs.findIndex((tab) => tab.id === visibleActiveId);
+      const next =
+        index === -1
+          ? offset === 1
+            ? visibleTabs[0]
+            : visibleTabs[visibleTabs.length - 1]
+          : visibleTabs[
+              (index + offset + visibleTabs.length) % visibleTabs.length
+            ];
+      if (next) tabs.activate(next.id);
+    },
+    [tabs, visibleActiveId, visibleTabs]
+  );
+  const discardRuntimeWorkspace = useCallback(
+    (runtimeId: RuntimeId) => {
+      discardRuntime(runtimeId);
+      clearRuntimeQueries(queryClient, runtimeId);
+    },
+    [discardRuntime, queryClient]
+  );
 
   // Collapse / expand the left side panel. The initial width is recovered from
   // localStorage once (lazy ref init) and fed straight into `defaultSize`, so
@@ -322,20 +370,13 @@ function PageWorkspace({
 
   const switchWorkspaceRuntime = useCallback(
     (nextRuntimeId: RuntimeId) => {
-      const current = workspaceRuntimeIdRef.current;
-      if (current !== nextRuntimeId) {
-        closeRuntime(current);
-      }
-      if (current !== nextRuntimeId && nextRuntimeId.startsWith("remote:")) {
-        closeRuntime(nextRuntimeId);
-      }
       workspaceRuntimeIdRef.current = nextRuntimeId;
       setWorkspaceRuntimeId(nextRuntimeId);
       setSidebarMode("files");
       void queryClient.invalidateQueries({ queryKey: ["fs"] });
       void queryClient.invalidateQueries({ queryKey: ["thread"] });
     },
-    [closeRuntime, queryClient, setWorkspaceRuntimeId, workspaceRuntimeIdRef]
+    [queryClient, setWorkspaceRuntimeId, workspaceRuntimeIdRef]
   );
 
   const refreshRuntimes = useCallback(
@@ -425,18 +466,22 @@ function PageWorkspace({
   useRegisterCommands({
     closeTab: ({ id, path, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
-      const target = id ?? (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
+      const target =
+        id ??
+        (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
       if (target) close(target);
     },
     closeOtherTabs: ({ id, path, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
-      const target = id ?? (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
-      if (target) closeOthers(target);
+      const target =
+        id ??
+        (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
+      if (target) closeOthersInRuntime(target, targetRuntimeId);
     },
-    closeAllTabs: () => closeAll(),
+    closeAllTabs: () => closeAllInRuntime(workspaceRuntimeIdRef.current),
     reopenClosedTab: () => void reopenClosed(),
-    selectNextTab: () => activateNext(),
-    selectPreviousTab: () => activatePrevious(),
+    selectNextTab: () => activateVisibleSibling(1),
+    selectPreviousTab: () => activateVisibleSibling(-1),
     toggleSidebar: () => toggleSidebar(),
     openSettings: ({ tab }) => {
       if (tab) setSettingsTab(tab);
@@ -459,8 +504,7 @@ function PageWorkspace({
     shareThread: ({ path, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeId;
       if (targetRuntimeId !== workspaceRuntimeId) return;
-      const activeId = activeTabIdRef.current;
-      const activeTab = tabs.tabs.find((tab) => tab.id === activeId);
+      const activeTab = visibleTabs.find((tab) => tab.id === visibleActiveId);
       const target =
         path ??
         (activeTab?.type === "thread" && activeTab.runtimeId === targetRuntimeId
@@ -657,7 +701,9 @@ function PageWorkspace({
             )}
             <RemoteStatus
               runtimeId={workspaceRuntimeId}
+              onDisconnecting={discardRuntimeWorkspace}
               onDisconnected={(runtimeId) => {
+                discardRuntimeWorkspace(runtimeId);
                 if (workspaceRuntimeIdRef.current !== runtimeId) return;
                 transitionWorkspaceRuntime("local");
               }}
@@ -666,7 +712,7 @@ function PageWorkspace({
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel minSize={640}>
-            {tabs.tabs.length === 0 ? (
+            {visibleTabs.length === 0 ? (
               <Welcome
                 onNewStarter={() => setExamplesOpen(true)}
                 onNewFile={() =>
@@ -684,9 +730,9 @@ function PageWorkspace({
               />
             ) : (
               <ThreadTabs
-                tabs={tabs.tabs}
-                activeId={tabs.activeId}
-                activate={tabs.activate}
+                tabs={visibleTabs}
+                activeId={visibleActiveId}
+                activate={activateVisibleTab}
                 refresh={tabs.refresh}
                 consumeDiscardedPane={tabs.consumeDiscardedPane}
                 sidebarOpen={sidebarOpen}
@@ -697,7 +743,7 @@ function PageWorkspace({
                 reveal={handleRevealFile}
                 moveToTrash={handleMoveToTrash}
                 share={handleShareThread}
-                reorder={tabs.reorder}
+                reorder={reorderVisibleTabs}
                 onNewFile={handleNewFile}
                 onMove={tabs.handleMove}
                 onTraceTitleChange={tabs.handleTraceTitleChange}
@@ -722,11 +768,11 @@ function PageWorkspace({
             transitionWorkspaceRuntime(runtimeId);
           }}
           onRemoteDisconnected={(runtimeId) => {
+            discardRuntimeWorkspace(runtimeId);
             if (workspaceRuntimeIdRef.current === runtimeId) {
               transitionWorkspaceRuntime("local");
             } else if (runtimeId.startsWith("remote:")) {
               setSettingsOpen(false);
-              closeRuntime(runtimeId);
             }
           }}
         />

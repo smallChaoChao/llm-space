@@ -15,9 +15,11 @@ import type { RuntimeId } from "@/shared/runtime";
 
 export function RemoteStatus({
   runtimeId,
+  onDisconnecting,
   onDisconnected,
 }: {
   runtimeId: RuntimeId;
+  onDisconnecting?: (runtimeId: RuntimeId) => void;
   onDisconnected: (runtimeId: RuntimeId) => void;
 }) {
   const [server, setServer] = useState<RemoteServerView | null>(null);
@@ -56,6 +58,7 @@ export function RemoteStatus({
 
   const disconnect = async () => {
     setBusy(true);
+    onDisconnecting?.(runtimeId);
     try {
       await disconnectRemoteServer(server.id);
       onDisconnected(runtimeId);
