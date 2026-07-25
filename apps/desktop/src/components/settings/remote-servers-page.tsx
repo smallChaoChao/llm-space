@@ -37,30 +37,13 @@ interface FormState {
   name: string;
   host: string;
   user: string;
-  port: string;
-  identityFile: string;
-  remoteRepo: string;
-  remoteInstallDir: string;
-  remoteHome: string;
-  remoteServerPort: string;
-  localPort: string;
 }
-
-const DEFAULT_REMOTE_HOME = "~/.llm-space-server";
-const DEFAULT_REMOTE_INSTALL_DIR = "~/.llm-space/remote-runtime";
 
 function _emptyForm(): FormState {
   return {
     name: "",
     host: "",
     user: "",
-    port: "",
-    identityFile: "",
-    remoteRepo: "",
-    remoteInstallDir: DEFAULT_REMOTE_INSTALL_DIR,
-    remoteHome: DEFAULT_REMOTE_HOME,
-    remoteServerPort: "39123",
-    localPort: "",
   };
 }
 
@@ -238,7 +221,6 @@ export function RemoteServersPage({
                       <span className="text-muted-foreground block truncate text-xs">
                         {server.user ? `${server.user}@` : ""}
                         {server.host}
-                        {server.port ? `:${server.port}` : ""}
                       </span>
                     </span>
                     {server.status === "connected" ? (
@@ -316,7 +298,6 @@ function RemoteServerDetails({
         <p className="text-muted-foreground text-sm">
           {server.user ? `${server.user}@` : ""}
           {server.host}
-          {server.port ? `:${server.port}` : ""}
         </p>
       </div>
       <div className="grid gap-2 rounded-lg border p-3 text-sm">
@@ -326,21 +307,6 @@ function RemoteServerDetails({
         ) : null}
         <Info label="Runtime" value={server.runtimeId} />
       </div>
-      <details className="rounded-lg border p-3 text-sm">
-        <summary className="cursor-pointer font-medium">Advanced details</summary>
-        <div className="mt-3 grid gap-2">
-          <Info label="SSH port" value={server.port ? String(server.port) : "SSH config"} />
-          <Info label="Identity file" value={server.identityFile ?? "SSH config"} />
-          <Info label="Install dir" value={server.remoteInstallDir} />
-          <Info label="Remote repo" value={server.remoteRepo ?? "Packaged runtime"} />
-          <Info label="Remote home" value={server.remoteHome} />
-          <Info label="Server port" value={String(server.remoteServerPort)} />
-          <Info
-            label="Local port"
-            value={server.localPort ? String(server.localPort) : "Auto"}
-          />
-        </div>
-      </details>
       {server.error ? (
         <p className="text-destructive text-sm">{server.error}</p>
       ) : null}
@@ -394,7 +360,8 @@ function RemoteServerForm({
           {form.id ? "Edit server" : "Add server"}
         </h3>
         <p className="text-muted-foreground text-sm">
-          Usually only name, host and user are required for a prepared devbox.
+          Configure SSH details such as port, identity file, and jump host in
+          your system ~/.ssh/config.
         </p>
       </div>
       <div className="grid gap-3 rounded-lg border p-3">
@@ -414,52 +381,6 @@ function RemoteServerForm({
           onChange={(user) => onChange({ ...form, user })}
         />
       </div>
-      <details className="rounded-lg border p-3">
-        <summary className="cursor-pointer text-sm font-medium">
-          Advanced
-        </summary>
-        <div className="mt-3 grid gap-3">
-          <Field
-            label="SSH port"
-            value={form.port}
-            onChange={(port) => onChange({ ...form, port })}
-          />
-          <Field
-            label="Identity file"
-            value={form.identityFile}
-            onChange={(identityFile) => onChange({ ...form, identityFile })}
-          />
-          <Field
-            label="Install directory"
-            value={form.remoteInstallDir}
-            onChange={(remoteInstallDir) =>
-              onChange({ ...form, remoteInstallDir })
-            }
-          />
-          <Field
-            label="Remote repo (legacy source mode)"
-            value={form.remoteRepo}
-            onChange={(remoteRepo) => onChange({ ...form, remoteRepo })}
-          />
-          <Field
-            label="Remote home"
-            value={form.remoteHome}
-            onChange={(remoteHome) => onChange({ ...form, remoteHome })}
-          />
-          <Field
-            label="Server port"
-            value={form.remoteServerPort}
-            onChange={(remoteServerPort) =>
-              onChange({ ...form, remoteServerPort })
-            }
-          />
-          <Field
-            label="Local port"
-            value={form.localPort}
-            onChange={(localPort) => onChange({ ...form, localPort })}
-          />
-        </div>
-      </details>
       <div className="flex gap-2">
         <Button size="sm" onClick={onSave}>
           {form.id ? "Update" : "Add"}
@@ -505,13 +426,6 @@ function _draft(form: FormState): RemoteServerDraft {
     name: form.name,
     host: form.host,
     user: form.user || undefined,
-    port: _number(form.port),
-    identityFile: form.identityFile || undefined,
-    remoteRepo: form.remoteRepo || undefined,
-    remoteInstallDir: form.remoteInstallDir || undefined,
-    remoteHome: form.remoteHome || undefined,
-    remoteServerPort: _number(form.remoteServerPort),
-    localPort: form.localPort ? _number(form.localPort) : undefined,
   };
 }
 
@@ -521,25 +435,12 @@ function _form(server: RemoteServerView): FormState {
     name: server.name,
     host: server.host,
     user: server.user ?? "",
-    port: server.port ? String(server.port) : "",
-    identityFile: server.identityFile ?? "",
-    remoteRepo: server.remoteRepo ?? "",
-    remoteInstallDir: server.remoteInstallDir,
-    remoteHome: server.remoteHome,
-    remoteServerPort: String(server.remoteServerPort),
-    localPort: server.localPort ? String(server.localPort) : "",
   };
 }
 
-function _number(value: string): number | undefined {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed)) throw new Error(`Invalid number: ${value}`);
-  return parsed;
-}
-
 function _failureTitle(server: RemoteServerView | undefined): string {
-  if (!server?.stageLabel) return "Remote server action failed";
+  if (!server?.stageLabel || server.stage === "error") {
+    return "Remote server action failed";
+  }
   return `${server.stageLabel} failed`;
 }

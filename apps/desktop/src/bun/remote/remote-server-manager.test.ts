@@ -127,10 +127,10 @@ describe("RemoteServerManager", () => {
     expect(manager.listServers()[0]?.remoteInstallDir).toBe(
       "~/.llm-space/remote-runtime"
     );
-    expect(manager.listServers()[0]?.port).toBeUndefined();
+    expect(manager.listServers()[0]).not.toHaveProperty("port");
   });
 
-  test("preserves explicit port 22 in current config version", () => {
+  test("drops advanced ssh overrides from current config version", () => {
     const home = mkdtempSync(
       path.join(tmpdir(), "llm-space-remote-manager-test-")
     );
@@ -147,10 +147,14 @@ describe("RemoteServerManager", () => {
               kind: "ssh",
               name: "explicit 22",
               host: "host",
+              user: "user",
               port: 22,
+              identityFile: "/tmp/key",
+              remoteRepo: "/tmp/repo",
               remoteHome: "~/.llm-space-server",
               remoteServerPort: 39123,
               remoteInstallDir: "~/.llm-space/remote-runtime",
+              localPort: 40000,
               createdAt: 1,
               updatedAt: 1,
             },
@@ -169,7 +173,51 @@ describe("RemoteServerManager", () => {
       home
     );
 
-    expect(manager.listServers()[0]?.port).toBe(22);
+    const [server] = manager.listServers();
+    expect(server).toMatchObject({
+      name: "explicit 22",
+      host: "host",
+      user: "user",
+      remoteInstallDir: "~/.llm-space/remote-runtime",
+      remoteHome: "~/.llm-space-server",
+      remoteServerPort: 39123,
+    });
+    expect(server).not.toHaveProperty("port");
+    expect(server).not.toHaveProperty("identityFile");
+    expect(server).not.toHaveProperty("remoteRepo");
+    expect(server).not.toHaveProperty("localPort");
+  });
+
+  test("uses only name host and user for managed ssh config", async () => {
+    let sshConfig: SshRemoteRuntimeConfig | undefined;
+    const manager = _manager((config) => {
+      sshConfig = config;
+      return Promise.resolve({
+        client: _remoteRuntime(config.id),
+        stop: () => Promise.resolve(),
+      });
+    });
+
+    const [server] = manager.addServer({
+      name: "devbox",
+      host: "devbox",
+      user: "qiangenchao",
+    });
+
+    await manager.connectServer(server.id);
+
+    expect(sshConfig).toMatchObject({
+      name: "devbox",
+      host: "devbox",
+      user: "qiangenchao",
+      port: undefined,
+      identityFile: undefined,
+      remoteRepo: "",
+      remoteInstallDir: "~/.llm-space/remote-runtime",
+      remoteHome: "~/.llm-space-server",
+      remoteServerPort: 39123,
+      localPort: undefined,
+    });
   });
 
   test("cleans local state when disconnect stop fails", async () => {

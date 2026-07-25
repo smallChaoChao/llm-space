@@ -41,7 +41,7 @@ Then add a Remote Server in LLM Space with:
 - **Host**: the OpenSSH host alias, for example `llm-devbox`
 - **User**: optional; leave it empty when `User` is already set in `~/.ssh/config`
 
-Advanced fields are only overrides for special cases. Prefer putting SSH-level options such as port, identity file, jump host, proxy command, and agent behavior in `~/.ssh/config`.
+LLM Space only stores these fields. Put SSH-level options such as port, identity file, jump host, proxy command, and agent behavior in `~/.ssh/config`.
 
 ## Passwords and passphrases
 
@@ -82,3 +82,15 @@ First confirm the host identity with your infrastructure provider or administrat
 ```
 
 LLM Space does not provide an “ignore host key” button because bypassing host key verification can hide a real man-in-the-middle attack.
+
+## Downloading remote runtime times out
+
+If progress reaches **Downloading remote runtime package** and then fails with a server-install timeout, SSH is already working. The remote Linux machine could not download the `llm-space-server` release archive in time.
+
+Check from your Mac:
+
+```sh
+ssh llm-devbox 'curl -I -L --connect-timeout 15 https://github.com/deer-flow/llm-space/releases/latest'
+```
+
+If that hangs or fails, fix network access on the remote machine: configure the remote shell's `HTTPS_PROXY`/`HTTP_PROXY`, allow GitHub release downloads, or use a network/mirror that the remote server can reach. Download speed is determined by the remote machine, not by the Mac running the desktop app.

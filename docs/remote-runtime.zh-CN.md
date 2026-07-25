@@ -41,7 +41,7 @@ Host llm-devbox
 - **Host**：OpenSSH Host alias，例如 `llm-devbox`
 - **User**：可选；如果 `~/.ssh/config` 里已经配置 `User`，这里可以留空
 
-Advanced 字段只用于特殊覆盖。端口、私钥、跳板机、代理命令、agent 行为等 SSH 层配置，优先写在 `~/.ssh/config`。
+LLM Space 只保存这些字段。端口、私钥、跳板机、代理命令、agent 行为等 SSH 层配置，统一写在 `~/.ssh/config`。
 
 ## 密码和私钥 passphrase
 
@@ -82,3 +82,15 @@ OpenSSH 会阻止你连接身份发生变化的主机。如果 LLM Space 报 SSH
 ```
 
 LLM Space 不提供 “ignore host key” 按钮，因为绕过 host key 校验可能掩盖真实的中间人攻击。
+
+## 下载 remote runtime 超时
+
+如果进度到 **Downloading remote runtime package** 后报 server-install timeout，说明 SSH 已经通了。失败点是远端 Linux 机器没有在限定时间内下载完 `llm-space-server` release 包。
+
+在 Mac 上这样检查远端网络：
+
+```sh
+ssh llm-devbox 'curl -I -L --connect-timeout 15 https://github.com/deer-flow/llm-space/releases/latest'
+```
+
+如果该命令卡住或失败，需要修远端机器的网络：给远端 shell 配置 `HTTPS_PROXY`/`HTTP_PROXY`，放通 GitHub release 下载，或使用远端能访问的网络/镜像。下载速度取决于远端机器，不取决于运行桌面 app 的 Mac。

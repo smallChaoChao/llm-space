@@ -63,6 +63,36 @@ describe("remote server installer", () => {
     });
     expect(command).toContain("/opt/llm space/it'\\''s");
     expect(command).toContain("https://example.test/a'\\''b.tar.gz");
+    expect(command).toContain("--connect-timeout 15 --max-time 240");
+    expect(command).toContain("--timeout=30 --tries=3");
     expect(command).not.toContain("/home/user/.llm-space-server");
+  });
+
+  test("describes package download timeouts with remote network probe", async () => {
+    const promise = installRemoteServerPackage(CONFIG, (_config, command, timeoutMs) => {
+      if (command.includes("uname")) {
+        return Promise.resolve({ stdout: "Linux\nx86_64\n", stderr: "" });
+      }
+      if (command.startsWith("cat ")) {
+        return Promise.reject(new Error("missing manifest"));
+      }
+      if (command.includes("curl -fL")) {
+        expect(timeoutMs).toBe(300_000);
+        return Promise.reject(
+          new Error("Remote command timed out after 300000ms.")
+        );
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    try {
+      await promise;
+      throw new Error("install should fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(
+        /Remote runtime package download timed out after 300000ms\..*Check remote network access with: ssh host/s
+      );
+    }
   });
 });

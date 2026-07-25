@@ -16,8 +16,27 @@ Error: forwarding disabled due to host key check failure`,
 
     expect(message).toContain("SSH host key verification failed for user@host1");
     expect(message).toContain("/Users/bytedance/.ssh/known_hosts line 6");
+    expect(message).toContain(
+      "After confirming it is safe, remove that stale known_hosts entry and reconnect."
+    );
     expect(message).toContain("port forwarding was disabled");
     expect(message).not.toContain("REMOTE HOST IDENTIFICATION HAS CHANGED");
+  });
+
+  test("gives first-time host key failures a terminal trust action", () => {
+    const message = formatSshBootstrapFailure({
+      stage: "health-check",
+      label: "ssh tunnel",
+      target: "qiangenchao@10.37.112.248",
+      output: "Host key verification failed.",
+    });
+
+    expect(message).toContain(
+      "SSH host key verification failed for qiangenchao@10.37.112.248"
+    );
+    expect(message).toContain(
+      "run ssh qiangenchao@10.37.112.248 once in Terminal"
+    );
   });
 
   test("describes host key impact by bootstrap stage", () => {

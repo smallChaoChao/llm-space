@@ -4,19 +4,11 @@ export interface RemoteServerDraft {
   name: string;
   host: string;
   user?: string;
-  port?: number;
-  identityFile?: string;
-  remoteRepo?: string;
-  remoteInstallDir?: string;
-  remoteHome?: string;
-  remoteServerPort?: number;
-  localPort?: number;
 }
 
 export interface RemoteServerConfig extends RemoteServerDraft {
   id: string;
   kind: "ssh";
-  port?: number;
   remoteInstallDir: string;
   remoteHome: string;
   remoteServerPort: number;

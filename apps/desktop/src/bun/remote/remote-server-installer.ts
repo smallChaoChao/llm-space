@@ -9,7 +9,7 @@ import {
   serverPackageAssetUrl,
 } from "./server-package";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
-import { shellQuote } from "./ssh-command";
+import { buildSshTarget, shellQuote } from "./ssh-command";
 
 export interface RemoteServerInstallResult {
   entrypoint: string;
@@ -40,6 +40,8 @@ export class RemoteServerInstallError extends Error {
     this.name = "RemoteServerInstallError";
   }
 }
+
+const INSTALL_TIMEOUT_MS = 300_000;
 
 export async function installRemoteServerPackage(
   config: SshRemoteRuntimeConfig,
@@ -85,17 +87,26 @@ export async function installRemoteServerPackage(
     message: "Downloading remote runtime package",
   });
   try {
-    await run(config, buildInstallCommand({
-      installDir,
-      version,
-      assetName,
-      assetUrl,
-      packageDir,
-    }), 120_000);
+    await run(
+      config,
+      buildInstallCommand({
+        installDir,
+        version,
+        assetName,
+        assetUrl,
+        packageDir,
+      }),
+      INSTALL_TIMEOUT_MS
+    );
   } catch (error) {
     throw new RemoteServerInstallError(
       "server-install",
-      error instanceof Error ? error.message : String(error),
+      _formatInstallFailure(config, {
+        error,
+        assetName,
+        assetUrl,
+        timeoutMs: INSTALL_TIMEOUT_MS,
+      }),
       { cause: error }
     );
   }
@@ -140,7 +151,7 @@ export function buildInstallCommand(input: {
     'rm -rf "$TMP_DIR"',
     'mkdir -p "$TMP_DIR"',
     'ARCHIVE="$DOWNLOAD_DIR/$ASSET_NAME"',
-    'if command -v curl >/dev/null 2>&1; then curl -fL "$ASSET_URL" -o "$ARCHIVE"; elif command -v wget >/dev/null 2>&1; then wget -O "$ARCHIVE" "$ASSET_URL"; else echo "curl or wget is required to download llm-space-server" >&2; exit 1; fi',
+    'if command -v curl >/dev/null 2>&1; then curl -fL --connect-timeout 15 --max-time 240 --retry 2 --retry-delay 2 "$ASSET_URL" -o "$ARCHIVE"; elif command -v wget >/dev/null 2>&1; then wget --timeout=30 --tries=3 -O "$ARCHIVE" "$ASSET_URL"; else echo "curl or wget is required to download llm-space-server" >&2; exit 1; fi',
     'tar -xzf "$ARCHIVE" -C "$TMP_DIR"',
     'EXTRACTED="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)"',
     'test -n "$EXTRACTED"',
@@ -149,6 +160,36 @@ export function buildInstallCommand(input: {
     'rm -rf "$TMP_DIR"',
     `ln -sfn ${shellQuote(`versions/${input.version}`)} "$INSTALL_DIR/current"`,
   ].join(" && ");
+}
+
+function _formatInstallFailure(
+  config: SshRemoteRuntimeConfig,
+  input: {
+    error: unknown;
+    assetName: string;
+    assetUrl: string;
+    timeoutMs: number;
+  }
+): string {
+  const message =
+    input.error instanceof Error ? input.error.message : String(input.error);
+  const target = buildSshTarget(config);
+  const probeCommand = `ssh ${target} ${shellQuote(
+    `curl -I -L --connect-timeout 15 ${shellQuote(input.assetUrl)}`
+  )}`;
+  if (/timed out after \d+ms/i.test(message)) {
+    return [
+      `Remote runtime package download timed out after ${input.timeoutMs}ms.`,
+      `LLM Space can reach the SSH server, but the server did not finish downloading ${input.assetName}.`,
+      `Check remote network access with: ${probeCommand}`,
+      "If GitHub is blocked or slow on the remote server, configure the remote server's proxy for curl/wget or use a mirrored release asset URL.",
+    ].join(" ");
+  }
+  return [
+    message,
+    `Package URL: ${input.assetUrl}`,
+    `Check remote network access with: ${probeCommand}`,
+  ].join(" ");
 }
 
 async function _hasInstalledPackage(

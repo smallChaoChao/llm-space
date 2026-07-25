@@ -35,8 +35,15 @@ type StartSshRemoteRuntime = (
 
 interface RemoteServersConfigFile {
   version?: number;
-  servers: RemoteServerConfig[];
+  servers: PersistedRemoteServerConfig[];
 }
+
+type PersistedRemoteServerConfig = RemoteServerConfig & {
+  port?: number;
+  identityFile?: string;
+  remoteRepo?: string;
+  localPort?: number;
+};
 
 const REMOTE_SERVERS_CONFIG_VERSION = 2;
 
@@ -255,14 +262,14 @@ export class RemoteServerManager {
       name: server.name,
       host: server.host,
       user: server.user,
-      port: server.port,
-      identityFile: server.identityFile,
+      port: undefined,
+      identityFile: undefined,
       extraArgs: [],
-      remoteRepo: server.remoteRepo ?? "",
+      remoteRepo: "",
       remoteInstallDir: server.remoteInstallDir,
       remoteHome: server.remoteHome,
       remoteServerPort: server.remoteServerPort,
-      localPort: server.localPort,
+      localPort: undefined,
       makeDefault: false,
     };
   }
@@ -291,9 +298,6 @@ export class RemoteServerManager {
   ): RemoteServerConfig {
     const name = draft.name.trim();
     const host = draft.host.trim();
-    const remoteRepo = _optional(draft.remoteRepo);
-    const remoteInstallDir =
-      _optional(draft.remoteInstallDir) ?? DEFAULT_REMOTE_INSTALL_DIR;
     if (!name) throw new Error("Remote server name is required.");
     if (!host) throw new Error("Remote server host is required.");
     return {
@@ -302,19 +306,9 @@ export class RemoteServerManager {
       name,
       host,
       user: _optional(draft.user),
-      port: draft.port ? _port(draft.port, 0, "SSH port") : undefined,
-      identityFile: _optional(draft.identityFile),
-      remoteRepo,
-      remoteInstallDir,
-      remoteHome: _optional(draft.remoteHome) ?? "~/.llm-space-server",
-      remoteServerPort: _port(
-        draft.remoteServerPort,
-        39123,
-        "Remote server port"
-      ),
-      localPort: draft.localPort
-        ? _port(draft.localPort, 0, "Local tunnel port")
-        : undefined,
+      remoteInstallDir: DEFAULT_REMOTE_INSTALL_DIR,
+      remoteHome: "~/.llm-space-server",
+      remoteServerPort: 39123,
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
     };
@@ -329,11 +323,8 @@ export class RemoteServerManager {
     const parsed = JSON.parse(
       readFileSync(this._configPath, "utf8")
     ) as RemoteServersConfigFile;
-    const isLegacy = parsed.version !== REMOTE_SERVERS_CONFIG_VERSION;
     return Array.isArray(parsed.servers)
-      ? parsed.servers.map((server) =>
-          this._normalizeLoadedServer(server, { isLegacy })
-        )
+      ? parsed.servers.map((server) => this._normalizeLoadedServer(server))
       : [];
   }
 
@@ -351,18 +342,14 @@ export class RemoteServerManager {
   }
 
   private _normalizeLoadedServer(
-    server: RemoteServerConfig,
-    options: { isLegacy: boolean }
+    server: PersistedRemoteServerConfig
   ): RemoteServerConfig {
     return {
-      ...server,
-      port:
-        options.isLegacy && server.port === 22
-          ? undefined
-          : server.port
-          ? _port(server.port, 0, "SSH port")
-          : undefined,
-      remoteRepo: _optional(server.remoteRepo),
+      id: server.id,
+      kind: "ssh",
+      name: server.name,
+      host: server.host,
+      user: _optional(server.user),
       remoteInstallDir:
         _optional(server.remoteInstallDir) ?? DEFAULT_REMOTE_INSTALL_DIR,
       remoteHome: _optional(server.remoteHome) ?? "~/.llm-space-server",
@@ -371,6 +358,8 @@ export class RemoteServerManager {
         39123,
         "Remote server port"
       ),
+      createdAt: server.createdAt,
+      updatedAt: server.updatedAt,
     };
   }
 
