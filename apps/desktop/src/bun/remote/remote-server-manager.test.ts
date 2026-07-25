@@ -63,16 +63,128 @@ function _trustedHostKeyService(): SshHostKeyService {
 }
 
 describe("RemoteServerManager", () => {
-  test("connecting a second SSH server disconnects the first", async () => {
+  test("connecting a second SSH server disconnects the first after the second connects", async () => {
     const stopped: string[] = [];
-    const manager = _manager((config) =>
-      Promise.resolve({
+    const starts: string[] = [];
+    const manager = _manager((config) => {
+      starts.push(config.id);
+      return Promise.resolve({
         client: _remoteRuntime(config.id),
         stop: () => {
           stopped.push(config.id);
           return Promise.resolve();
         },
-      })
+      });
+    });
+
+    const [host1] = manager.addServer({
+      name: "host1",
+      host: "host1",
+    });
+    const host2 = manager.addServer({
+      name: "host2",
+      host: "host2",
+    })[1];
+
+    await manager.connectServer(host1.id);
+    expect(stopped).toEqual([]);
+    const next = await manager.connectServer(host2.id);
+
+    expect(starts).toEqual([host1.runtimeId, host2.runtimeId]);
+    expect(stopped).toEqual([host1.runtimeId]);
+    expect(next.find((server) => server.id === host1.id)?.status).toBe(
+      "disconnected"
+    );
+    expect(next.find((server) => server.id === host2.id)?.status).toBe(
+      "connected"
+    );
+    expect(next.find((server) => server.id === host2.id)?.defaultRuntime).toBe(
+      true
+    );
+  });
+
+  test("keeps the previous SSH server connected when connecting a second server fails", async () => {
+    const stopped: string[] = [];
+    const manager = _manager((config) => {
+      if (config.host === "host2") {
+        return Promise.reject(new Error("host2 failed"));
+      }
+      return Promise.resolve({
+        client: _remoteRuntime(config.id),
+        stop: () => {
+          stopped.push(config.id);
+          return Promise.resolve();
+        },
+      });
+    });
+
+    const [host1] = manager.addServer({
+      name: "host1",
+      host: "host1",
+    });
+    const host2 = manager.addServer({
+      name: "host2",
+      host: "host2",
+    })[1];
+
+    await manager.connectServer(host1.id);
+    try {
+      await manager.connectServer(host2.id);
+      throw new Error("connect should fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("host2 failed");
+    }
+
+    const next = manager.listServers();
+    expect(stopped).toEqual([]);
+    expect(next.find((server) => server.id === host1.id)?.status).toBe(
+      "connected"
+    );
+    expect(next.find((server) => server.id === host1.id)?.defaultRuntime).toBe(
+      true
+    );
+    expect(next.find((server) => server.id === host2.id)?.status).toBe(
+      "error"
+    );
+    expect(next.find((server) => server.id === host2.id)?.defaultRuntime).toBe(
+      false
+    );
+  });
+
+  test("keeps the previous SSH server connected while a second server waits for host trust", async () => {
+    const stopped: string[] = [];
+    const manager = _manager(
+      (config) =>
+        Promise.resolve({
+          client: _remoteRuntime(config.id),
+          stop: () => {
+            stopped.push(config.id);
+            return Promise.resolve();
+          },
+        }),
+      undefined,
+      undefined,
+      {
+        check: (config) =>
+          Promise.resolve(
+            config.host === "host2"
+              ? {
+                  status: "first-time",
+                  request: {
+                    requestId: "trust-host2",
+                    kind: "first-time",
+                    target: "host2",
+                    host: "host2",
+                    keyType: "ssh-ed25519",
+                    fingerprint: "SHA256:host2",
+                    publicKeyLine: "host2 ssh-ed25519 AAAA",
+                  },
+                }
+              : { status: "trusted" }
+          ),
+        trust: () => Promise.resolve(),
+      }
     );
 
     const [host1] = manager.addServer({
@@ -85,9 +197,59 @@ describe("RemoteServerManager", () => {
     })[1];
 
     await manager.connectServer(host1.id);
-    const next = await manager.connectServer(host2.id);
+    const waiting = await manager.connectServer(host2.id);
 
-    expect(stopped).toEqual([host1.runtimeId]);
+    expect(stopped).toEqual([]);
+    expect(waiting.find((server) => server.id === host1.id)?.status).toBe(
+      "connected"
+    );
+    expect(waiting.find((server) => server.id === host1.id)?.defaultRuntime).toBe(
+      true
+    );
+    expect(waiting.find((server) => server.id === host2.id)?.status).toBe(
+      "trust-required"
+    );
+
+    const rejected = await manager.rejectServerHostKey(
+      host2.id,
+      "trust-host2"
+    );
+
+    expect(rejected.find((server) => server.id === host1.id)?.status).toBe(
+      "connected"
+    );
+    expect(
+      rejected.find((server) => server.id === host1.id)?.defaultRuntime
+    ).toBe(true);
+    expect(rejected.find((server) => server.id === host2.id)?.status).toBe(
+      "disconnected"
+    );
+  });
+
+  test("does not fail a successful switch when previous server cleanup fails", async () => {
+    const manager = _manager((config) =>
+      Promise.resolve({
+        client: _remoteRuntime(config.id),
+        stop: () =>
+          config.host === "host1"
+            ? Promise.reject(new Error("stop host1 failed"))
+            : Promise.resolve(),
+      })
+    );
+
+    const [host1] = manager.addServer({
+      name: "host1",
+      host: "host1",
+    });
+    const host2 = manager.addServer({
+      name: "host2",
+      host: "host2",
+    })[1];
+
+    const next = await manager.connectServer(host1.id).then(() =>
+      manager.connectServer(host2.id)
+    );
+
     expect(next.find((server) => server.id === host1.id)?.status).toBe(
       "disconnected"
     );

@@ -71,7 +71,9 @@ During Connect, LLM Space reports the main stages:
 
 The Remote Servers page also shows a **Connection flow** timeline with SSH, Host key, Platform, Install runtime, Start server, Tunnel, and Health check. If the connection fails, the failed step keeps its detailed message so you can tell whether the failure happened during SSH authentication, package installation, server startup, tunnel creation, or runtime health check.
 
-Before reusing an installed remote runtime package, LLM Space verifies both `server-manifest.json` and the executable `bin/llm-space-server`. If a previous install left a partial version directory where the manifest exists but the binary is missing or not executable, the next connection treats it as incomplete and reinstalls that version automatically.
+Before reusing an installed remote runtime package, LLM Space verifies both `server-manifest.json` and the executable `bin/llm-space-server`. If a previous install left a partial version directory where the manifest exists but the binary is missing or not executable, the connection treats it as incomplete and reinstalls that version automatically.
+
+If the binary disappears or loses execute permission after installation but before startup or health check, LLM Space cleans the remote install artifacts once and retries installation in the same connection. The cleanup is limited to the install directory (`~/.llm-space/remote-runtime` by default): `versions/`, `downloads/`, `current`, and temporary install directories. It does **not** delete the remote runtime home (`~/.llm-space-server` by default), so workspace files and runtime settings are preserved.
 
 ## Host key verification failures
 
@@ -115,4 +117,4 @@ ssh llm-devbox 'curl -I -L --connect-timeout 15 https://github.com/deer-flow/llm
 
 If that hangs or fails but LLM Space still connects successfully, the local download/upload fallback worked.
 
-If the fallback still fails, use the error detail to identify the next boundary: local GitHub download failures require fixing the Desktop machine's network or proxy; upload failures usually mean SSH cannot write to the remote install directory; remote install failures usually mean missing `tar`, low disk space, or permissions under `~/.llm-space/remote-runtime`.
+If the fallback still fails, use the error detail to identify the next boundary: local GitHub download failures require fixing the Desktop machine's network or proxy; upload failures usually mean SSH cannot write to the remote install directory; remote install failures usually mean missing `tar`, low disk space, permissions under `~/.llm-space/remote-runtime`, an external cleanup job, or an incorrect remote install directory.

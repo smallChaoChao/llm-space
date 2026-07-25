@@ -45,3 +45,25 @@ export function remoteConnectionFlow(
 ): RemoteConnectionStepView[] {
   return server.steps ?? [];
 }
+
+export interface RemoteConnectionAction {
+  label: "Connect" | "Disconnect" | "Connecting" | "Trust required";
+  action: "connect" | "disconnect" | null;
+  disabled: boolean;
+}
+
+export function remoteConnectionAction(
+  server: RemoteServerView,
+  busy: boolean
+): RemoteConnectionAction {
+  if (server.status === "connecting") {
+    return { label: "Connecting", action: null, disabled: true };
+  }
+  if (server.status === "trust-required") {
+    return { label: "Trust required", action: null, disabled: true };
+  }
+  if (server.status === "connected") {
+    return { label: "Disconnect", action: "disconnect", disabled: busy };
+  }
+  return { label: "Connect", action: "connect", disabled: busy };
+}

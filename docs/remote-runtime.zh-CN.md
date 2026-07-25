@@ -71,7 +71,9 @@ LLM Space 在检测平台和准备 runtime 时可能会调用多次短 `ssh` 命
 
 Remote Servers 页面还会展示 **Connection flow** 时间线，包含 SSH、Host key、Platform、Install runtime、Start server、Tunnel 和 Health check。连接失败时，失败步骤会保留详细信息，帮助判断失败发生在 SSH 认证、包安装、server 启动、隧道创建，还是 runtime 健康检查。
 
-复用已安装的远端 runtime 包之前，LLM Space 会同时校验 `server-manifest.json` 和可执行文件 `bin/llm-space-server`。如果之前安装留下了残缺版本目录，例如 manifest 存在但二进制缺失或不可执行，下一次连接会把它视为未完整安装并自动重新安装该版本。
+复用已安装的远端 runtime 包之前，LLM Space 会同时校验 `server-manifest.json` 和可执行文件 `bin/llm-space-server`。如果之前安装留下了残缺版本目录，例如 manifest 存在但二进制缺失或不可执行，本次连接会把它视为未完整安装并自动重新安装该版本。
+
+如果二进制在安装后、启动或 health check 前消失，或者失去可执行权限，LLM Space 会在同一次连接中清理一次远端安装产物并重新安装。清理范围仅限安装目录（默认 `~/.llm-space/remote-runtime`）下的 `versions/`、`downloads/`、`current` 和安装临时目录，不会删除远端 runtime home（默认 `~/.llm-space-server`），因此 workspace 文件和 runtime 配置会保留。
 
 ## Host key 校验失败
 
@@ -115,4 +117,4 @@ ssh llm-devbox 'curl -I -L --connect-timeout 15 https://github.com/deer-flow/llm
 
 如果该命令卡住或失败，但 LLM Space 仍然连接成功，说明本地下载上传 fallback 生效了。
 
-如果 fallback 后仍失败，按错误详情区分：本地无法访问 GitHub 时，修运行 Desktop 这台机器的网络或代理；上传失败时，检查 SSH 是否允许写入远端安装目录；远端安装失败时，检查远端磁盘空间、`tar` 是否可用，以及 `~/.llm-space/remote-runtime` 权限。
+如果 fallback 后仍失败，按错误详情区分：本地无法访问 GitHub 时，修运行 Desktop 这台机器的网络或代理；上传失败时，检查 SSH 是否允许写入远端安装目录；远端安装失败时，检查远端磁盘空间、`tar` 是否可用、`~/.llm-space/remote-runtime` 权限、是否有外部清理任务，以及 remote install dir 是否配置错误。

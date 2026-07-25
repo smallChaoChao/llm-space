@@ -145,7 +145,6 @@ export class RemoteServerManager {
       return this.listServers();
     }
 
-    await this._disconnectOtherServers(id);
     this._setConnection(id, {
       status: "connecting",
       stage: "ssh-check",
@@ -183,6 +182,7 @@ export class RemoteServerManager {
         stageLabel: "Connected",
         handle,
       });
+      await this._disconnectOtherServersAfterConnect(id);
       return this.listServers();
     } catch (error) {
       const failedStage = this._connections.get(id)?.stage ?? "error";
@@ -269,11 +269,21 @@ export class RemoteServerManager {
     return this.listServers();
   }
 
-  private async _disconnectOtherServers(keepId: string): Promise<void> {
+  private async _disconnectOtherServersAfterConnect(
+    keepId: string
+  ): Promise<void> {
     await Promise.all(
       [...this._connections.keys()]
         .filter((id) => id !== keepId)
-        .map((id) => this._disconnectServer(id))
+        .map(async (id) => {
+          try {
+            await this._disconnectServer(id);
+          } catch {
+            // The new remote is already connected and selected as default.
+            // Treat stale remote cleanup as best-effort so a stop failure does
+            // not turn a successful connection switch into a failed connect.
+          }
+        })
     );
   }
 

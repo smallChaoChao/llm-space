@@ -14,6 +14,11 @@ export interface SshBootstrapFailureInput {
   target?: string;
 }
 
+export interface MissingRuntimeBinaryFailure {
+  path: string;
+  reason: "missing" | "not-executable";
+}
+
 const MAX_GENERIC_OUTPUT_LENGTH = 1200;
 
 export function formatSshBootstrapFailure({
@@ -41,15 +46,30 @@ export function formatSshBootstrapFailure({
 }
 
 function _formatMissingRuntimeBinary(output: string): string | null {
-  if (!/No such file or directory/i.test(output)) return null;
+  const failure = parseMissingRuntimeBinaryFailure(output);
+  if (!failure) return null;
+  return [
+    failure.reason === "missing"
+      ? "Remote runtime binary is missing."
+      : "Remote runtime binary is not executable.",
+    `${failure.path} does not exist or is not executable on the SSH server.`,
+    "LLM Space will reinstall the remote runtime package once and retry the connection.",
+  ].join(" ");
+}
+
+export function parseMissingRuntimeBinaryFailure(
+  output: string
+): MissingRuntimeBinaryFailure | null {
   const match = /([^\s'":]+llm-space-server)/.exec(output);
   if (!match) return null;
   const path = match[1];
-  return [
-    "Remote runtime binary is missing.",
-    `${path} does not exist or is not executable on the SSH server.`,
-    "LLM Space will verify the remote runtime package and reinstall the version on the next connect.",
-  ].join(" ");
+  if (/No such file or directory|does not exist/i.test(output)) {
+    return { path, reason: "missing" };
+  }
+  if (/Permission denied|not executable/i.test(output)) {
+    return { path, reason: "not-executable" };
+  }
+  return null;
 }
 
 function _formatAuthenticationFailure(

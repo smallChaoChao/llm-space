@@ -53,7 +53,11 @@ export class RemoteServerInstallError extends Error {
   }
 }
 
-const INSTALL_TIMEOUT_MS = 300_000;
+const REMOTE_DOWNLOAD_TIMEOUT_WITH_FALLBACK_MS = 120_000;
+const REMOTE_DOWNLOAD_TIMEOUT_MS = 300_000;
+const FALLBACK_INSTALL_TIMEOUT_MS = 300_000;
+const PACKAGE_DOWNLOAD_MAX_TIME_WITH_FALLBACK_SECONDS = 120;
+const PACKAGE_DOWNLOAD_MAX_TIME_SECONDS = 240;
 
 export async function installRemoteServerPackage(
   config: SshRemoteRuntimeConfig,
@@ -118,8 +122,13 @@ export async function installRemoteServerPackage(
         assetName,
         assetUrl,
         packageDir,
+        packageDownloadMaxTimeSeconds: options.packageUploader
+          ? PACKAGE_DOWNLOAD_MAX_TIME_WITH_FALLBACK_SECONDS
+          : PACKAGE_DOWNLOAD_MAX_TIME_SECONDS,
       }),
-      INSTALL_TIMEOUT_MS
+      options.packageUploader
+        ? REMOTE_DOWNLOAD_TIMEOUT_WITH_FALLBACK_MS
+        : REMOTE_DOWNLOAD_TIMEOUT_MS
     );
   } catch (error) {
     await _installWithFallbackUpload(config, run, options, {
@@ -159,12 +168,30 @@ export async function detectRemoteServerPlatform(
   return parseRemotePlatform({ unameS, unameM });
 }
 
+export async function cleanRemoteRuntimeInstallArtifacts(
+  config: SshRemoteRuntimeConfig,
+  run: RemoteCommandRunner = execRemoteCommand
+): Promise<void> {
+  const installDir = shellQuote(config.remoteInstallDir);
+  await run(
+    config,
+    [
+      "set -e",
+      `INSTALL_DIR=${installDir}`,
+      'mkdir -p "$INSTALL_DIR"',
+      'rm -rf "$INSTALL_DIR/versions" "$INSTALL_DIR/downloads" "$INSTALL_DIR/current" "$INSTALL_DIR"/.tmp-* "$INSTALL_DIR"/.pkg-* "$INSTALL_DIR"/.old-*',
+    ].join(" && "),
+    30_000
+  );
+}
+
 export function buildInstallCommand(input: {
   installDir: string;
   version: string;
   assetName: string;
   assetUrl: string;
   packageDir: string;
+  packageDownloadMaxTimeSeconds?: number;
 }): string {
   return buildDownloadAndInstallCommand(input);
 }
@@ -175,10 +202,13 @@ export function buildDownloadAndInstallCommand(input: {
   assetName: string;
   assetUrl: string;
   packageDir: string;
+  packageDownloadMaxTimeSeconds?: number;
 }): string {
   const installDir = shellQuote(input.installDir);
   const assetName = shellQuote(input.assetName);
   const assetUrl = shellQuote(input.assetUrl);
+  const packageDownloadMaxTimeSeconds =
+    input.packageDownloadMaxTimeSeconds ?? PACKAGE_DOWNLOAD_MAX_TIME_SECONDS;
   return [
     "set -e",
     `INSTALL_DIR=${installDir}`,
@@ -192,7 +222,7 @@ export function buildDownloadAndInstallCommand(input: {
     'CHECKSUM_TMP="$ARCHIVE.sha256.tmp-$$"',
     'rm -f "$ARCHIVE_TMP" "$CHECKSUM_TMP"',
     'trap \'rm -f "$ARCHIVE_TMP" "$CHECKSUM_TMP"\' EXIT',
-    'if command -v curl >/dev/null 2>&1; then curl -fL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 "$CHECKSUM_URL" -o "$CHECKSUM_TMP" && curl -fL --connect-timeout 15 --max-time 240 --retry 2 --retry-delay 2 "$ASSET_URL" -o "$ARCHIVE_TMP"; elif command -v wget >/dev/null 2>&1; then wget --timeout=30 --tries=3 -O "$CHECKSUM_TMP" "$CHECKSUM_URL" && wget --timeout=30 --tries=3 -O "$ARCHIVE_TMP" "$ASSET_URL"; else echo "curl or wget is required to download llm-space-server" >&2; exit 1; fi',
+    `if command -v curl >/dev/null 2>&1; then curl -fL --connect-timeout 15 --max-time 60 --retry 2 --retry-delay 2 "$CHECKSUM_URL" -o "$CHECKSUM_TMP" && curl -fL --connect-timeout 15 --max-time ${packageDownloadMaxTimeSeconds} --retry 2 --retry-delay 2 "$ASSET_URL" -o "$ARCHIVE_TMP"; elif command -v wget >/dev/null 2>&1; then wget --timeout=30 --tries=3 -O "$CHECKSUM_TMP" "$CHECKSUM_URL" && wget --timeout=30 --tries=3 -O "$ARCHIVE_TMP" "$ASSET_URL"; else echo "curl or wget is required to download llm-space-server" >&2; exit 1; fi`,
     'EXPECTED_SHA="$(awk \'{print $1}\' "$CHECKSUM_TMP")"',
     'case "$EXPECTED_SHA" in [A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9]*) ;; *) echo "Invalid server package checksum" >&2; exit 1 ;; esac',
     'ACTUAL_SHA="$(sha256sum "$ARCHIVE_TMP" | awk \'{print $1}\')"',
@@ -258,7 +288,9 @@ async function _installWithFallbackUpload(
     error: input.error,
     assetName: input.assetName,
     assetUrl: input.assetUrl,
-    timeoutMs: INSTALL_TIMEOUT_MS,
+    timeoutMs: options.packageUploader
+      ? REMOTE_DOWNLOAD_TIMEOUT_WITH_FALLBACK_MS
+      : REMOTE_DOWNLOAD_TIMEOUT_MS,
   });
   if (!options.packageUploader) {
     throw new RemoteServerInstallError("server-install", remoteDownloadError, {
@@ -290,7 +322,7 @@ async function _installWithFallbackUpload(
         assetName: input.assetName,
         packageDir: input.packageDir,
       }),
-      INSTALL_TIMEOUT_MS
+      FALLBACK_INSTALL_TIMEOUT_MS
     );
   } catch (fallbackError) {
     throw new RemoteServerInstallError(

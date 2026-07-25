@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildInstallFromArchiveCommand,
   buildInstallCommand,
+  cleanRemoteRuntimeInstallArtifacts,
   installRemoteServerPackage,
 } from "./remote-server-installer";
 import { currentDesktopVersion } from "./server-package";
@@ -138,6 +139,26 @@ describe("remote server installer", () => {
     expect(command).not.toContain("ASSET_URL");
   });
 
+  test("cleans only remote runtime install artifacts", async () => {
+    const commands: string[] = [];
+    await cleanRemoteRuntimeInstallArtifacts(CONFIG, (_config, command, timeoutMs) => {
+      commands.push(command);
+      expect(timeoutMs).toBe(30_000);
+      return Promise.resolve({ stdout: "", stderr: "" });
+    });
+
+    expect(commands).toHaveLength(1);
+    const command = commands[0];
+    expect(command).toContain("INSTALL_DIR='/opt/llm space/runtime'");
+    expect(command).toContain('"$INSTALL_DIR/versions"');
+    expect(command).toContain('"$INSTALL_DIR/downloads"');
+    expect(command).toContain('"$INSTALL_DIR/current"');
+    expect(command).toContain('"$INSTALL_DIR"/.tmp-*');
+    expect(command).toContain('"$INSTALL_DIR"/.pkg-*');
+    expect(command).toContain('"$INSTALL_DIR"/.old-*');
+    expect(command).not.toContain(CONFIG.remoteHome);
+  });
+
   test("describes package download timeouts with remote network probe", async () => {
     const promise = installRemoteServerPackage(CONFIG, (_config, command, timeoutMs) => {
       if (command.includes("uname")) {
@@ -165,6 +186,43 @@ describe("remote server installer", () => {
       );
       expect((error as Error).message).toMatch(
         /Remote runtime package download timed out after 300000ms\..*Check remote network access with: ssh host/s
+      );
+    }
+  });
+
+  test("uses a shorter remote download timeout when upload fallback is available", async () => {
+    const promise = installRemoteServerPackage(
+      CONFIG,
+      (_config, command, timeoutMs) => {
+        if (command.includes("uname")) {
+          return Promise.resolve({ stdout: "Linux\nx86_64\n", stderr: "" });
+        }
+        if (command.startsWith("cat ")) {
+          return Promise.reject(new Error("missing manifest"));
+        }
+        if (command.includes("curl -fL")) {
+          expect(command).toContain("--connect-timeout 15 --max-time 120");
+          expect(timeoutMs).toBe(120_000);
+          return Promise.reject(
+            new Error("Remote command timed out after 120000ms.")
+          );
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+      {
+        packageUploader: {
+          upload: () => Promise.reject(new Error("upload denied")),
+        },
+      }
+    );
+
+    try {
+      await promise;
+      throw new Error("install should fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(
+        /Remote runtime package download timed out after 120000ms\. Package URL: https:\/\/github\.com\/deer-flow\/llm-space\/releases\/download\//
       );
     }
   });
@@ -203,11 +261,12 @@ describe("remote server installer", () => {
 
   test("falls back to local package upload when remote download fails", async () => {
     const commands: string[] = [];
+    const timeouts: number[] = [];
     const uploads: string[] = [];
     let manifestInstalled = false;
     const result = await installRemoteServerPackage(
       CONFIG,
-      (_config, command) => {
+      (_config, command, timeoutMs) => {
         commands.push(command);
         if (command.includes("uname")) {
           return Promise.resolve({ stdout: "Linux\nx86_64\n", stderr: "" });
@@ -230,11 +289,13 @@ describe("remote server installer", () => {
           });
         }
         if (command.includes("curl -fL")) {
+          timeouts.push(timeoutMs ?? 0);
           return Promise.reject(
             new Error("Remote command failed with exit code 28: curl timeout")
           );
         }
         if (command.includes("test -f \"$ARCHIVE\"")) {
+          timeouts.push(timeoutMs ?? 0);
           manifestInstalled = true;
           return Promise.resolve({ stdout: "", stderr: "" });
         }
@@ -262,6 +323,7 @@ describe("remote server installer", () => {
     expect(uploads).toEqual([
       `/opt/llm space/runtime/downloads/llm-space-server-${currentDesktopVersion()}-linux-x64.tar.gz`,
     ]);
+    expect(timeouts).toEqual([120_000, 300_000]);
     expect(commands.some((command) => command.includes("curl -fL"))).toBe(true);
     expect(
       commands.some(

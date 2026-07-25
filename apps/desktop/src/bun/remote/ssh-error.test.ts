@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { formatSshBootstrapFailure } from "./ssh-error";
+import {
+  formatSshBootstrapFailure,
+  parseMissingRuntimeBinaryFailure,
+} from "./ssh-error";
 
 describe("formatSshBootstrapFailure", () => {
   test("classifies OpenSSH host key failures", () => {
@@ -83,8 +86,30 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
     expect(message).toContain(
       "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server"
     );
-    expect(message).toContain("reinstall the version on the next connect");
+    expect(message).toContain("reinstall the remote runtime package once");
     expect(message).not.toContain("health-check");
+  });
+
+  test("parses missing remote runtime binary failures", () => {
+    expect(
+      parseMissingRuntimeBinaryFailure(
+        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server: No such file or directory"
+      )
+    ).toEqual({
+      path: "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server",
+      reason: "missing",
+    });
+  });
+
+  test("parses non-executable remote runtime binary failures", () => {
+    expect(
+      parseMissingRuntimeBinaryFailure(
+        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server: Permission denied"
+      )
+    ).toEqual({
+      path: "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server",
+      reason: "not-executable",
+    });
   });
 
   test("classifies authentication failures", () => {

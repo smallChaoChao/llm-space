@@ -12,7 +12,6 @@ import {
 } from "@llm-space/ui/ui/dialog";
 import { Input } from "@llm-space/ui/ui/input";
 import { Separator } from "@llm-space/ui/ui/separator";
-import { Switch } from "@llm-space/ui/ui/switch";
 import {
   Check,
   Circle,
@@ -46,8 +45,7 @@ import type {
 import type { RuntimeId } from "@/shared/runtime";
 
 import {
-  remoteConnectionChecked,
-  remoteConnectionDisabled,
+  remoteConnectionAction,
   remoteConnectionFlow,
   remoteStageSummary,
 } from "./remote-server-display";
@@ -302,23 +300,19 @@ export function RemoteServersPage({
                       server.status === "connecting" ? (
                       <Loader2 className="size-4 shrink-0 animate-spin" />
                     ) : null}
-                    <Switch
-                      size="sm"
-                      checked={remoteConnectionChecked(server)}
-                      disabled={remoteConnectionDisabled(
-                        server,
-                        busyId === server.id
-                      )}
-                      aria-label={`${remoteConnectionChecked(server) ? "Disconnect" : "Connect"} ${server.name}`}
-                      onCheckedChange={(checked) => {
-                        void run(
-                          server.id,
-                          checked ? connectRemoteServer : disconnectRemoteServer,
-                          checked
-                            ? { closeOnConnected: true }
-                            : { notifyDisconnected: true }
-                        );
-                      }}
+                    <RemoteConnectionButton
+                      server={server}
+                      busy={busyId === server.id}
+                      onConnect={() =>
+                        void run(server.id, connectRemoteServer, {
+                          closeOnConnected: true,
+                        })
+                      }
+                      onDisconnect={() =>
+                        void run(server.id, disconnectRemoteServer, {
+                          notifyDisconnected: true,
+                        })
+                      }
                     />
                   </div>
                 ))}
@@ -403,14 +397,11 @@ function RemoteServerDetails({
             {server.host}
           </p>
         </div>
-        <Switch
-          checked={remoteConnectionChecked(server)}
-          disabled={remoteConnectionDisabled(server, busy)}
-          aria-label={`${remoteConnectionChecked(server) ? "Disconnect" : "Connect"} ${server.name}`}
-          onCheckedChange={(checked) => {
-            if (checked) onConnect();
-            else onDisconnect();
-          }}
+        <RemoteConnectionButton
+          server={server}
+          busy={busy}
+          onConnect={onConnect}
+          onDisconnect={onDisconnect}
         />
       </div>
       <div className="grid gap-2 rounded-lg border p-3 text-sm">
@@ -448,6 +439,39 @@ function RemoteServerDetails({
         />
       ) : null}
     </div>
+  );
+}
+
+function RemoteConnectionButton({
+  server,
+  busy,
+  onConnect,
+  onDisconnect,
+}: {
+  server: RemoteServerView;
+  busy: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+}) {
+  const connectionAction = remoteConnectionAction(server, busy);
+  return (
+    <Button
+      size="sm"
+      variant={
+        connectionAction.action === "disconnect" ? "secondary" : "default"
+      }
+      disabled={connectionAction.disabled}
+      aria-label={`${connectionAction.label} ${server.name}`}
+      onClick={() => {
+        if (connectionAction.action === "connect") onConnect();
+        if (connectionAction.action === "disconnect") onDisconnect();
+      }}
+    >
+      {connectionAction.label === "Connecting" ? (
+        <Loader2 className="size-3.5 animate-spin" />
+      ) : null}
+      {connectionAction.label}
+    </Button>
   );
 }
 
