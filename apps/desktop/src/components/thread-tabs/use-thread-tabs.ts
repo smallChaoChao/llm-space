@@ -11,6 +11,7 @@ import { threadTitleFromPath } from "@llm-space/ui/lib/thread-file";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createFileSystemClient, traceClient } from "@/client";
+import { listRuntimes } from "@/client/remote-servers";
 import type { RuntimeId } from "@/shared/runtime";
 
 /** An open workspace thread tab. `id` is stable as `thread:{path}`. */
@@ -283,10 +284,24 @@ async function _traceExists(tab: TraceTab): Promise<boolean> {
   }
 }
 
-async function _tabExists(tab: AppTab): Promise<boolean> {
+async function _tabExists(
+  tab: AppTab,
+  availableRuntimeIds?: Set<RuntimeId>
+): Promise<boolean> {
+  if (availableRuntimeIds && !availableRuntimeIds.has(tab.runtimeId)) {
+    return false;
+  }
   return tab.type === "thread"
     ? _threadFileExists(tab.path, tab.runtimeId)
     : _traceExists(tab);
+}
+
+async function _availableRuntimeIds(): Promise<Set<RuntimeId> | undefined> {
+  try {
+    return new Set((await listRuntimes()).map((runtime) => runtime.id));
+  } catch {
+    return undefined;
+  }
 }
 
 export function useThreadTabs(): ThreadTabs {
@@ -328,9 +343,14 @@ export function useThreadTabs(): ThreadTabs {
     const restoredActive = activeId;
     if (restored.length === 0) return;
     let cancelled = false;
-    void Promise.all(
-      restored.map(async (tab) => ((await _tabExists(tab)) ? tab : null))
-    ).then((checked) => {
+    void (async () => {
+      const runtimeIds = await _availableRuntimeIds();
+      return Promise.all(
+        restored.map(async (tab) =>
+          (await _tabExists(tab, runtimeIds)) ? tab : null
+        )
+      );
+    })().then((checked) => {
       if (cancelled) return;
       const alive = checked.filter((tab): tab is AppTab => tab !== null);
       if (alive.length !== restored.length) setTabs(alive);
@@ -479,9 +499,12 @@ export function useThreadTabs(): ThreadTabs {
     const group = closedStack.current.pop();
     if (!group) return;
     const restored = group.map(_fromPersisted).filter(Boolean) as AppTab[];
+    const runtimeIds = await _availableRuntimeIds();
     const alive = (
       await Promise.all(
-        restored.map(async (tab) => ((await _tabExists(tab)) ? tab : null))
+        restored.map(async (tab) =>
+          (await _tabExists(tab, runtimeIds)) ? tab : null
+        )
       )
     ).filter((tab): tab is AppTab => tab !== null);
     if (alive.length === 0) return;

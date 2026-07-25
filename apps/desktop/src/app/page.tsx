@@ -313,6 +313,15 @@ function PageInner() {
     [switchWorkspaceRuntime]
   );
 
+  const transitionWorkspaceRuntime = useCallback(
+    (nextRuntimeId: RuntimeId) => {
+      setSettingsOpen(false);
+      switchWorkspaceRuntime(nextRuntimeId);
+      void refreshRuntimes({ syncDefault: false });
+    },
+    [refreshRuntimes, switchWorkspaceRuntime]
+  );
+
   useEffect(() => {
     void refreshRuntimes({ syncDefault: true }).catch(() => undefined);
   }, [refreshRuntimes]);
@@ -583,8 +592,7 @@ function PageInner() {
               runtimeId={workspaceRuntimeId}
               onDisconnected={(runtimeId) => {
                 if (workspaceRuntimeIdRef.current !== runtimeId) return;
-                switchWorkspaceRuntime("local");
-                void refreshRuntimes({ syncDefault: true });
+                transitionWorkspaceRuntime("local");
               }}
             />
             <AccountStatus />
@@ -644,15 +652,13 @@ function PageInner() {
           onOpenChange={setSettingsOpen}
           onTabChange={setSettingsTab}
           onRemoteConnected={(runtimeId) => {
-            setSettingsOpen(false);
-            switchWorkspaceRuntime(runtimeId);
-            void refreshRuntimes({ syncDefault: true });
+            transitionWorkspaceRuntime(runtimeId);
           }}
           onRemoteDisconnected={(runtimeId) => {
             if (workspaceRuntimeIdRef.current === runtimeId) {
-              switchWorkspaceRuntime("local");
-              void refreshRuntimes({ syncDefault: true });
+              transitionWorkspaceRuntime("local");
             } else if (runtimeId.startsWith("remote:")) {
+              setSettingsOpen(false);
               closeRuntime(runtimeId);
             }
           }}

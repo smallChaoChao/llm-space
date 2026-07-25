@@ -12,8 +12,8 @@ import {
 } from "@llm-space/ui/ui/dialog";
 import { Input } from "@llm-space/ui/ui/input";
 import { Separator } from "@llm-space/ui/ui/separator";
+import { Switch } from "@llm-space/ui/ui/switch";
 import {
-  CheckCircle2,
   ShieldAlert,
   Loader2,
   Plus,
@@ -42,6 +42,11 @@ import type {
 } from "@/shared/remote-servers";
 import type { RuntimeId } from "@/shared/runtime";
 
+import {
+  remoteConnectionChecked,
+  remoteConnectionDisabled,
+  remoteStageSummary,
+} from "./remote-server-display";
 import { SettingsPage } from "./settings-page";
 
 interface FormState {
@@ -250,39 +255,61 @@ export function RemoteServersPage({
                 No remote servers. Click + to add one.
               </div>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {servers.map((server) => (
-                  <button
+                  <div
                     key={server.id}
-                    type="button"
                     className={cn(
-                      "hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-2 text-left",
-                      selectedId === server.id && "bg-accent"
+                      "hover:bg-accent/70 flex w-full items-center gap-2 rounded-lg border px-3 py-2 transition-colors",
+                      selectedId === server.id
+                        ? "border-primary/60 bg-primary/5"
+                        : "border-border bg-card/30"
                     )}
-                    onClick={() => {
-                      setSelectedId(server.id);
-                      setForm(null);
-                    }}
                   >
-                    <Server className="text-muted-foreground size-4 shrink-0" />
-                    <span className="min-w-0 grow">
-                      <span className="block truncate text-sm font-medium">
-                        {server.name}
+                    <button
+                      type="button"
+                      className="flex min-w-0 grow items-center gap-2 text-left"
+                      onClick={() => {
+                        setSelectedId(server.id);
+                        setForm(null);
+                      }}
+                    >
+                      <Server className="text-muted-foreground size-4 shrink-0" />
+                      <span className="min-w-0 grow">
+                        <span className="block truncate text-sm font-medium">
+                          {server.name}
+                        </span>
+                        <span className="text-muted-foreground block truncate text-xs">
+                          {server.user ? `${server.user}@` : ""}
+                          {server.host}
+                        </span>
                       </span>
-                      <span className="text-muted-foreground block truncate text-xs">
-                        {server.user ? `${server.user}@` : ""}
-                        {server.host}
-                      </span>
-                    </span>
-                    {server.status === "connected" ? (
-                      <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
-                    ) : server.status === "trust-required" ? (
+                    </button>
+                    {server.status === "trust-required" ? (
                       <ShieldAlert className="size-4 shrink-0 text-amber-500" />
                     ) : busyId === server.id ||
                       server.status === "connecting" ? (
                       <Loader2 className="size-4 shrink-0 animate-spin" />
                     ) : null}
-                  </button>
+                    <Switch
+                      size="sm"
+                      checked={remoteConnectionChecked(server)}
+                      disabled={remoteConnectionDisabled(
+                        server,
+                        busyId === server.id
+                      )}
+                      aria-label={`${remoteConnectionChecked(server) ? "Disconnect" : "Connect"} ${server.name}`}
+                      onCheckedChange={(checked) => {
+                        void run(
+                          server.id,
+                          checked ? connectRemoteServer : disconnectRemoteServer,
+                          checked
+                            ? { closeOnConnected: true }
+                            : { notifyDisconnected: true }
+                        );
+                      }}
+                    />
+                  </div>
                 ))}
               </div>
             )}
@@ -353,40 +380,40 @@ function RemoteServerDetails({
   onRejectHostKey: (request: RemoteHostKeyTrustRequest) => void;
   trustBusy: boolean;
 }) {
+  const progress = remoteStageSummary(server);
+  const progressTitle = server.stageLabel ?? progress ?? undefined;
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
-      <div>
-        <h3 className="text-base font-medium">{server.name}</h3>
-        <p className="text-muted-foreground text-sm">
-          {server.user ? `${server.user}@` : ""}
-          {server.host}
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-medium">{server.name}</h3>
+          <p className="text-muted-foreground truncate text-sm">
+            {server.user ? `${server.user}@` : ""}
+            {server.host}
+          </p>
+        </div>
+        <Switch
+          checked={remoteConnectionChecked(server)}
+          disabled={remoteConnectionDisabled(server, busy)}
+          aria-label={`${remoteConnectionChecked(server) ? "Disconnect" : "Connect"} ${server.name}`}
+          onCheckedChange={(checked) => {
+            if (checked) onConnect();
+            else onDisconnect();
+          }}
+        />
       </div>
       <div className="grid gap-2 rounded-lg border p-3 text-sm">
         <Info label="Status" value={server.status} />
-        {server.stageLabel ? (
-          <Info label="Progress" value={server.stageLabel} />
+        {progress ? (
+          <Info label="Progress" value={progress} title={progressTitle} />
         ) : null}
         <Info label="Runtime" value={server.runtimeId} />
+        <Info label="Workspace" value={_remoteWorkspacePath(server)} />
       </div>
       {server.error ? (
         <p className="text-destructive text-sm">{server.error}</p>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        {server.status === "connected" ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={busy}
-            onClick={onDisconnect}
-          >
-            Disconnect
-          </Button>
-        ) : (
-          <Button size="sm" disabled={busy} onClick={onConnect}>
-            Connect
-          </Button>
-        )}
         <Button
           size="sm"
           variant="secondary"
@@ -541,11 +568,19 @@ function RemoteServerForm({
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Info({
+  label,
+  value,
+  title = value,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
   return (
     <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className="truncate">
+      <span className="truncate" title={title}>
         <code>{value}</code>
       </span>
     </div>
@@ -584,6 +619,10 @@ function _form(server: RemoteServerView): FormState {
     host: server.host,
     user: server.user ?? "",
   };
+}
+
+function _remoteWorkspacePath(server: RemoteServerView): string {
+  return `${server.remoteHome.replace(/\/+$/, "")}/workspace`;
 }
 
 function _failureTitle(server: RemoteServerView | undefined): string {
