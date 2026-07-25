@@ -4,7 +4,7 @@ import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import { parseSshHostKeyOutput } from "./ssh-host-key";
 
 const CONFIG: Pick<SshRemoteRuntimeConfig, "host" | "port" | "user"> = {
-  host: "10.37.112.248",
+  host: "203.0.113.10",
   user: "giangenchao",
 };
 
@@ -22,7 +22,7 @@ SHA256:EcVgML2rZVGE6sCyfx0z7xBmJulP5tzpgy8aFTNSUEI.
 Add correct host key in /Users/bytedance/.ssh/known_hosts to get rid of this message.
 Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6
 Password authentication is disabled to avoid man-in-the-middle attacks.
-giangenchao@10.37.112.248: Permission denied (gssapi-with-mic,password).`,
+giangenchao@203.0.113.10: Permission denied (gssapi-with-mic,password).`,
       CONFIG
     );
 
@@ -37,7 +37,7 @@ giangenchao@10.37.112.248: Permission denied (gssapi-with-mic,password).`,
 
   test("parses first-time host key prompts with public key lines", () => {
     const result = parseSshHostKeyOutput(
-      `The authenticity of host 'devbox (10.37.112.248)' can't be established.
+      `The authenticity of host 'devbox (203.0.113.10)' can't be established.
 ED25519 key fingerprint is SHA256:FcVgML2rZVGE6sCyfx0z7xBmJulP5tzpgy8aFTNSUEI.
 Are you sure you want to continue connecting (yes/no/[fingerprint])?
 devbox ssh-ed25519 ${PUBLIC_KEY}`,

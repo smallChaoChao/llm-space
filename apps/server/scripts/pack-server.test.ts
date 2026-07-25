@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { bunCompileTarget } from "./pack-server";
+import desktopPackageJson from "../../desktop/package.json";
+
+import { bunCompileTarget, serverPackageVersion } from "./pack-server";
 
 describe("server package compile target", () => {
   test("maps linux package targets to Bun compile targets", () => {
@@ -16,5 +18,9 @@ describe("server package compile target", () => {
     expect(() =>
       bunCompileTarget({ os: "linux", arch: "riscv64" as "x64" })
     ).toThrow("Unsupported Bun compile target: linux-riscv64");
+  });
+
+  test("uses the desktop app version for server artifacts", () => {
+    expect(serverPackageVersion()).toBe(desktopPackageJson.version);
   });
 });

@@ -1,4 +1,4 @@
-import packageJson from "../package.json";
+import desktopPackageJson from "../../desktop/package.json";
 
 import { helpText, parseArgs } from "./args";
 import { startHttpServer } from "./http-server";
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     port: args.port,
     token: args.token,
     runtime,
-    version: packageJson.version,
+    version: desktopPackageJson.version,
     onShutdown: () => void stop(),
   });
 

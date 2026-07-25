@@ -42,7 +42,7 @@ await mock.module("./remote-exec", () => ({
         stdout:
           scenario === "port-in-use-unknown-owner"
             ? "PID=123\nARGS=python -m http.server 39123\n"
-            : "PID=2067161\nARGS=/home/test/.llm-space/remote-runtime/versions/4.4.6-beta.9/bin/llm-space-server --host 127.0.0.1 --port 39123\n",
+            : "PID=2067161\nARGS=/home/test/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server --host 127.0.0.1 --port 39123\n",
         stderr: "",
       });
     }
@@ -51,7 +51,8 @@ await mock.module("./remote-exec", () => ({
     }
     diagnosticCalls += 1;
     return Promise.resolve({
-      stdout: "USER=test\nHOME=/home/test\nPWD=/home/test\nentrypoint_exists:1\nentrypoint_executable:1\n",
+      stdout:
+        "USER=test\nHOME=/home/test\nPWD=/home/test\nentrypoint_exists:1\nentrypoint_executable:1\n",
       stderr: "",
     });
   },
@@ -90,7 +91,7 @@ await mock.module("./process-utils", () => ({
             ? "bash: bun: command not found"
             : portInUse
               ? "Failed to start server. Is port 39123 in use?"
-            : "",
+              : "",
       stop: () => {
         stopCalls += 1;
         return Promise.resolve();
@@ -153,7 +154,9 @@ describe("startSshRemoteRuntime", () => {
       },
       (error) => {
         expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain("bash: bun: command not found");
+        expect((error as Error).message).toContain(
+          "bash: bun: command not found"
+        );
       }
     );
 

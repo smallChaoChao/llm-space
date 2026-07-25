@@ -10,7 +10,7 @@ import type {
 } from "@llm-space/runtime/remote-package";
 import { REMOTE_RUNTIME_PROTOCOL_VERSION } from "@llm-space/runtime/remote-protocol";
 
-import serverPackageJson from "../package.json";
+import desktopPackageJson from "../../desktop/package.json";
 
 interface PackOptions {
   os: RemoteServerPackageOs;
@@ -25,7 +25,7 @@ const SERVER_ROOT = path.join(REPO_ROOT, "apps/server");
 
 async function main(): Promise<void> {
   const options = _parseArgs(Bun.argv.slice(2));
-  const version = serverPackageJson.version;
+  const version = serverPackageVersion();
   const packageName = `llm-space-server-${version}-${options.os}-${options.arch}`;
   const artifactsDir = path.resolve(REPO_ROOT, options.outDir);
   const stagingRoot = path.join(artifactsDir, ".staging");
@@ -70,7 +70,11 @@ async function main(): Promise<void> {
   );
 
   const sha256 = await _sha256(archivePath);
-  await writeFile(`${archivePath}.sha256`, `${sha256}  ${path.basename(archivePath)}\n`, "utf8");
+  await writeFile(
+    `${archivePath}.sha256`,
+    `${sha256}  ${path.basename(archivePath)}\n`,
+    "utf8"
+  );
   await rm(stagingRoot, { recursive: true, force: true });
 
   console.info(`Created ${path.relative(REPO_ROOT, archivePath)}`);
@@ -93,7 +97,10 @@ function _parseArgs(argv: string[]): PackOptions {
     throw new Error(`Unknown argument: ${arg}`);
   }
   const [targetOs, targetArch] = target.split("-");
-  if (targetOs !== "linux" || (targetArch !== "x64" && targetArch !== "arm64")) {
+  if (
+    targetOs !== "linux" ||
+    (targetArch !== "x64" && targetArch !== "arm64")
+  ) {
     throw new Error(`Unsupported server package target: ${target}`);
   }
   return { os: targetOs, arch: targetArch, outDir };
@@ -110,6 +117,10 @@ export function bunCompileTarget(input: {
     return "bun-linux-arm64";
   }
   throw new Error(`Unsupported Bun compile target: ${input.os}-${input.arch}`);
+}
+
+export function serverPackageVersion(): string {
+  return desktopPackageJson.version;
 }
 
 function _defaultTarget(): string {

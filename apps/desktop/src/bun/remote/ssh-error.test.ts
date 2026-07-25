@@ -18,7 +18,9 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6
 Error: forwarding disabled due to host key check failure`,
     });
 
-    expect(message).toContain("SSH host key verification failed for user@host1");
+    expect(message).toContain(
+      "SSH host key verification failed for user@host1"
+    );
     expect(message).toContain("/Users/bytedance/.ssh/known_hosts line 6");
     expect(message).toContain(
       "After confirming it is safe, remove that stale known_hosts entry and reconnect."
@@ -31,16 +33,14 @@ Error: forwarding disabled due to host key check failure`,
     const message = formatSshBootstrapFailure({
       stage: "health-check",
       label: "ssh tunnel",
-      target: "qiangenchao@10.37.112.248",
+      target: "user@203.0.113.10",
       output: "Host key verification failed.",
     });
 
     expect(message).toContain(
-      "SSH host key verification failed for qiangenchao@10.37.112.248"
+      "SSH host key verification failed for user@203.0.113.10"
     );
-    expect(message).toContain(
-      "run ssh qiangenchao@10.37.112.248 once in Terminal"
-    );
+    expect(message).toContain("run ssh user@203.0.113.10 once in Terminal");
   });
 
   test("describes host key impact by bootstrap stage", () => {
@@ -80,12 +80,12 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
       stage: "health-check",
       label: "remote server",
       output:
-        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server: No such file or directory",
+        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server: No such file or directory",
     });
 
     expect(message).toContain("Remote runtime binary is missing");
     expect(message).toContain(
-      "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server"
+      "/home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server"
     );
     expect(message).toContain("literal '~' directory");
     expect(message).not.toContain("will reinstall");
@@ -95,10 +95,10 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
   test("parses missing remote runtime binary failures", () => {
     expect(
       parseMissingRuntimeBinaryFailure(
-        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server: No such file or directory"
+        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server: No such file or directory"
       )
     ).toEqual({
-      path: "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server",
+      path: "/home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server",
       reason: "missing",
     });
   });
@@ -106,10 +106,10 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
   test("parses non-executable remote runtime binary failures", () => {
     expect(
       parseMissingRuntimeBinaryFailure(
-        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server: Permission denied"
+        "bash: line 1: /home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server: Permission denied"
       )
     ).toEqual({
-      path: "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server",
+      path: "/home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server",
       reason: "not-executable",
     });
   });
@@ -131,8 +131,7 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
     const message = formatSshBootstrapFailure({
       stage: "health-check",
       label: "remote server",
-      output:
-        "Failed to start server. Is port 39123 in use?",
+      output: "Failed to start server. Is port 39123 in use?",
     });
 
     expect(message).toContain("Remote runtime port 39123 is already in use");
@@ -158,7 +157,8 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
       stage: "server-install",
       label: "remote server installer",
       target: "user@host1",
-      output: "mkdir: cannot create directory '/opt/llm-space': Permission denied",
+      output:
+        "mkdir: cannot create directory '/opt/llm-space': Permission denied",
     });
 
     expect(message).not.toContain("SSH authentication failed");

@@ -8,6 +8,8 @@ import type {
   TraceLangfuseSearchInput,
 } from "@/shared/traces";
 
+import { runtimeScope } from "./runtime-scope";
+
 function _rpc() {
   const rpc = electrobun.rpc;
   if (!rpc) {
@@ -19,11 +21,14 @@ function _rpc() {
 export const traceClient = {
   /** List trace projects for the sidebar; returns an empty array on a fresh root. */
   listProjects(runtimeId?: RuntimeId) {
-    return _rpc().request.traceListProjects({ ..._scope(runtimeId) });
+    return _rpc().request.traceListProjects({ ...runtimeScope(runtimeId) });
   },
   /** Create a manual Langfuse project and return its persisted metadata. */
   createProject(name: string, runtimeId?: RuntimeId) {
-    return _rpc().request.traceCreateProject({ ..._scope(runtimeId), name });
+    return _rpc().request.traceCreateProject({
+      ...runtimeScope(runtimeId),
+      name,
+    });
   },
   /** Validate and create a connected Langfuse project with local credentials. */
   createConnectedProject(
@@ -31,13 +36,16 @@ export const traceClient = {
     runtimeId?: RuntimeId
   ) {
     return _rpc().request.traceCreateConnectedProject({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       ...input,
     });
   },
   /** List trace summaries for one project, sorted by trace start time. */
   listTraces(projectId: string, runtimeId?: RuntimeId) {
-    return _rpc().request.traceListTraces({ ..._scope(runtimeId), projectId });
+    return _rpc().request.traceListTraces({
+      ...runtimeScope(runtimeId),
+      projectId,
+    });
   },
   /** Import already-read Langfuse JSON files into a trace project. */
   importLangfuseJson(
@@ -46,7 +54,7 @@ export const traceClient = {
     runtimeId?: RuntimeId
   ) {
     return _rpc().request.traceImportLangfuseJson({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       projectId,
       files,
     });
@@ -58,7 +66,7 @@ export const traceClient = {
     runtimeId?: RuntimeId
   ) {
     return _rpc().request.traceSearchLangfuseTraces({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       projectId,
       filters,
     });
@@ -70,7 +78,7 @@ export const traceClient = {
     runtimeId?: RuntimeId
   ) {
     return _rpc().request.traceSyncLangfuseTraces({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       projectId,
       traceIds,
     });
@@ -78,7 +86,7 @@ export const traceClient = {
   /** Read one trace summary, used to validate restored trace tabs. */
   readTrace(projectId: string, traceKey: string, runtimeId?: RuntimeId) {
     return _rpc().request.traceReadTrace({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       projectId,
       traceKey,
     });
@@ -90,7 +98,7 @@ export const traceClient = {
     runtimeId?: RuntimeId
   ) {
     return _rpc().request.traceReadOrCreateWorkbench({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       projectId,
       traceKey,
     });
@@ -103,7 +111,7 @@ export const traceClient = {
     runtimeId?: RuntimeId
   ) {
     return _rpc().request.traceUpdateTraceTitle({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       projectId,
       traceKey,
       title,
@@ -117,14 +125,10 @@ export const traceClient = {
     runtimeId?: RuntimeId
   ): Promise<void> {
     await _rpc().request.traceWriteWorkbench({
-      ..._scope(runtimeId),
+      ...runtimeScope(runtimeId),
       projectId,
       traceKey,
       thread,
     });
   },
 };
-
-function _scope(runtimeId: RuntimeId | undefined) {
-  return runtimeId ? { runtimeId } : {};
-}

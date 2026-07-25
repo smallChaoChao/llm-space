@@ -32,7 +32,7 @@ describe("remote port owner", () => {
 
   test("recognizes stale llm-space-server from port scan output", () => {
     const owner = parseRemotePortOwnerProbeOutput(
-      "PID=2067161\nARGS=/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.9/bin/llm-space-server --host 127.0.0.1 --port 39123\n",
+      "PID=2067161\nARGS=/home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server --host 127.0.0.1 --port 39123\n",
       CONFIG
     );
 
@@ -45,7 +45,7 @@ describe("remote port owner", () => {
 
   test("recognizes stale llm-space-server from ps fallback output", () => {
     const owner = parseRemotePortOwnerProbeOutput(
-      "PS=2067161 /home/user/.llm-space/remote-runtime/versions/4.4.6-beta.9/bin/llm-space-server --host 127.0.0.1 --port 39123\n",
+      "PS=2067161 /home/user/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server --host 127.0.0.1 --port 39123\n",
       CONFIG
     );
 
@@ -62,7 +62,10 @@ describe("remote port owner", () => {
         "PID=123\nARGS=python -m http.server 39123\n",
         CONFIG
       )
-    ).toEqual({ kind: "other", detail: "pid 123: python -m http.server 39123" });
+    ).toEqual({
+      kind: "other",
+      detail: "pid 123: python -m http.server 39123",
+    });
   });
 
   test("stop command targets only a verified pid", () => {

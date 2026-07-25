@@ -4,6 +4,8 @@ import { electrobun } from "@/lib/electrobun";
 import type { StreamThreadResponsePayload } from "@/shared/rpc";
 import type { RuntimeId } from "@/shared/runtime";
 
+import { runtimeScope } from "./runtime-scope";
+
 const ABORT_ERROR = () =>
   new DOMException("The operation was aborted.", "AbortError");
 const EVENT_COMPACTION_THRESHOLD = 1024;
@@ -48,7 +50,7 @@ export function createRpcTransport(runtimeId?: RuntimeId): AgentTransport {
     };
 
     const onAbort = () => {
-      rpc.send.abortStreamThread({ ..._scope(runtimeId), streamId });
+      rpc.send.abortStreamThread({ ...runtimeScope(runtimeId), streamId });
       aborted = true;
       finished = true;
       notify();
@@ -63,7 +65,7 @@ export function createRpcTransport(runtimeId?: RuntimeId): AgentTransport {
 
     try {
       rpc.send.sendStreamThreadRequest({
-        ..._scope(runtimeId),
+        ...runtimeScope(runtimeId),
         streamId,
         request,
       });
@@ -104,12 +106,8 @@ export function createRpcTransport(runtimeId?: RuntimeId): AgentTransport {
       // Consumer stopped early (break / downstream error) without an abort
       // signal — make sure the bun side tears the stream down too.
       if (!finished) {
-        rpc.send.abortStreamThread({ ..._scope(runtimeId), streamId });
+        rpc.send.abortStreamThread({ ...runtimeScope(runtimeId), streamId });
       }
     }
   };
-}
-
-function _scope(runtimeId: RuntimeId | undefined) {
-  return runtimeId ? { runtimeId } : {};
 }

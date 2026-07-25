@@ -104,7 +104,7 @@ describe("ssh command builders", () => {
 
     const command = buildRemoteServerCommand({
       entrypoint:
-        "~/.llm-space/remote-runtime/versions/4.4.6-beta.9/bin/llm-space-server",
+        "~/.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server",
       host: "127.0.0.1",
       port: 39123,
       token: "token",
@@ -113,7 +113,7 @@ describe("ssh command builders", () => {
 
     expect(command).toContain(
       'exec "$HOME"/'.concat(
-        "'.llm-space/remote-runtime/versions/4.4.6-beta.9/bin/llm-space-server'"
+        "'.llm-space/remote-runtime/versions/4.4.4/bin/llm-space-server'"
       )
     );
     expect(command).toContain('--home "$HOME"/'.concat("'.llm-space-server'"));
@@ -122,9 +122,9 @@ describe("ssh command builders", () => {
   });
 
   test("joins remote paths without changing tilde semantics", () => {
-    expect(joinRemotePath("~/.llm-space/remote-runtime", "versions", "v1")).toBe(
-      "~/.llm-space/remote-runtime/versions/v1"
-    );
+    expect(
+      joinRemotePath("~/.llm-space/remote-runtime", "versions", "v1")
+    ).toBe("~/.llm-space/remote-runtime/versions/v1");
     expect(joinRemotePath("/opt/runtime/", "/versions/", "v1/")).toBe(
       "/opt/runtime/versions/v1"
     );

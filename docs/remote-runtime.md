@@ -26,7 +26,7 @@ A typical host alias looks like this:
 
 ```sshconfig
 Host llm-devbox
-  HostName 10.37.112.248
+  HostName 203.0.113.10
   User qiangenchao
   Port 22
   IdentityFile ~/.ssh/id_ed25519

@@ -26,7 +26,7 @@ Windows OpenSSH 的用户配置通常是：
 
 ```sshconfig
 Host llm-devbox
-  HostName 10.37.112.248
+  HostName 203.0.113.10
   User qiangenchao
   Port 22
   IdentityFile ~/.ssh/id_ed25519

@@ -9,6 +9,8 @@ import { normalizeThreadForPath } from "@llm-space/ui/lib/thread-file";
 import { electrobun } from "@/lib/electrobun";
 import type { RuntimeId } from "@/shared/runtime";
 
+import { runtimeScope } from "./runtime-scope";
+
 /**
  * Client-side `FileSystem` + `ThreadStorage` that talks to the bun side over
  * Electrobun RPC (the `fs*` requests), the desktop counterpart to the web
@@ -18,28 +20,39 @@ import type { RuntimeId } from "@/shared/runtime";
 export class LocalFileSystemClient implements FileSystem, ThreadStorage {
   constructor(private readonly _runtimeId?: RuntimeId) {}
   ls(path: string): Promise<FileNode[]> {
-    return this._rpc().request.fsLs({ ...this._scope(), path });
+    return this._rpc().request.fsLs({ ...runtimeScope(this._runtimeId), path });
   }
 
   async mkdir(path: string): Promise<void> {
-    await this._rpc().request.fsMkdir({ ...this._scope(), path });
+    await this._rpc().request.fsMkdir({
+      ...runtimeScope(this._runtimeId),
+      path,
+    });
   }
 
   async cp(src: string, dest: string): Promise<void> {
-    await this._rpc().request.fsCp({ ...this._scope(), src, dest });
+    await this._rpc().request.fsCp({
+      ...runtimeScope(this._runtimeId),
+      src,
+      dest,
+    });
   }
 
   async mv(src: string, dest: string): Promise<void> {
-    await this._rpc().request.fsMv({ ...this._scope(), src, dest });
+    await this._rpc().request.fsMv({
+      ...runtimeScope(this._runtimeId),
+      src,
+      dest,
+    });
   }
 
   async rm(path: string): Promise<void> {
-    await this._rpc().request.fsRm({ ...this._scope(), path });
+    await this._rpc().request.fsRm({ ...runtimeScope(this._runtimeId), path });
   }
 
   async read(path: string): Promise<Thread> {
     const thread = await this._rpc().request.fsRead({
-      ...this._scope(),
+      ...runtimeScope(this._runtimeId),
       path,
     });
     return normalizeThreadForPath(thread, path);
@@ -47,7 +60,7 @@ export class LocalFileSystemClient implements FileSystem, ThreadStorage {
 
   async write(path: string, thread: Thread): Promise<void> {
     await this._rpc().request.fsWrite({
-      ...this._scope(),
+      ...runtimeScope(this._runtimeId),
       path,
       thread: normalizeThreadForPath(thread, path),
     });
@@ -56,7 +69,7 @@ export class LocalFileSystemClient implements FileSystem, ThreadStorage {
   /** Reveal a file/directory in the OS file manager (Finder/Explorer). */
   async reveal(path: string): Promise<void> {
     const { path: absolutePath } = await this._rpc().request.fsRealpath({
-      ...this._scope(),
+      ...runtimeScope(this._runtimeId),
       path,
     });
     await this._rpc().request.fsReveal({ path: absolutePath });
@@ -65,14 +78,10 @@ export class LocalFileSystemClient implements FileSystem, ThreadStorage {
   /** Resolve a workspace-relative path to its absolute on-disk path. */
   async realpath(path: string): Promise<string> {
     const { path: abs } = await this._rpc().request.fsRealpath({
-      ...this._scope(),
+      ...runtimeScope(this._runtimeId),
       path,
     });
     return abs;
-  }
-
-  private _scope() {
-    return this._runtimeId ? { runtimeId: this._runtimeId } : {};
   }
 
   private _rpc() {

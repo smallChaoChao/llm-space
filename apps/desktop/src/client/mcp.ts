@@ -8,6 +8,8 @@ import type {
 import { electrobun } from "@/lib/electrobun";
 import type { RuntimeId } from "@/shared/runtime";
 
+import { runtimeScope } from "./runtime-scope";
+
 function _rpc() {
   if (!electrobun.rpc) {
     throw new Error("Electrobun RPC is not initialized");
@@ -18,14 +20,14 @@ function _rpc() {
 export async function listMcpServers(
   runtimeId?: RuntimeId
 ): Promise<McpServerView[]> {
-  return _rpc().request.mcpListServers({ ..._scope(runtimeId) });
+  return _rpc().request.mcpListServers({ ...runtimeScope(runtimeId) });
 }
 
 export async function addMcpServer(
   server: McpServerDraft,
   runtimeId?: RuntimeId
 ): Promise<McpServerView[]> {
-  return _rpc().request.mcpAddServer({ ..._scope(runtimeId), server });
+  return _rpc().request.mcpAddServer({ ...runtimeScope(runtimeId), server });
 }
 
 export async function updateMcpServer(
@@ -34,7 +36,7 @@ export async function updateMcpServer(
   runtimeId?: RuntimeId
 ): Promise<McpServerView[]> {
   return _rpc().request.mcpUpdateServer({
-    ..._scope(runtimeId),
+    ...runtimeScope(runtimeId),
     serverId,
     server,
   });
@@ -44,21 +46,27 @@ export async function removeMcpServer(
   serverId: string,
   runtimeId?: RuntimeId
 ): Promise<McpServerView[]> {
-  return _rpc().request.mcpRemoveServer({ ..._scope(runtimeId), serverId });
+  return _rpc().request.mcpRemoveServer({
+    ...runtimeScope(runtimeId),
+    serverId,
+  });
 }
 
 export async function disconnectMcpServer(
   serverId: string,
   runtimeId?: RuntimeId
 ): Promise<McpServerView[]> {
-  return _rpc().request.mcpDisconnectServer({ ..._scope(runtimeId), serverId });
+  return _rpc().request.mcpDisconnectServer({
+    ...runtimeScope(runtimeId),
+    serverId,
+  });
 }
 
 export async function listMcpTools(
   serverId: string,
   runtimeId?: RuntimeId
 ): Promise<McpServerToolsResponse> {
-  return _rpc().request.mcpListTools({ ..._scope(runtimeId), serverId });
+  return _rpc().request.mcpListTools({ ...runtimeScope(runtimeId), serverId });
 }
 
 export async function callMcpTool(
@@ -69,9 +77,5 @@ export async function callMcpTool(
   },
   runtimeId?: RuntimeId
 ): Promise<McpCallToolResponse> {
-  return _rpc().request.mcpCallTool({ ..._scope(runtimeId), ...input });
-}
-
-function _scope(runtimeId: RuntimeId | undefined) {
-  return runtimeId ? { runtimeId } : {};
+  return _rpc().request.mcpCallTool({ ...runtimeScope(runtimeId), ...input });
 }
