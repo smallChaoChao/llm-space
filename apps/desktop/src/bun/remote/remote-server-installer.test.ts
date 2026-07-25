@@ -4,13 +4,13 @@ import {
   buildInstallCommand,
   installRemoteServerPackage,
 } from "./remote-server-installer";
+import { currentDesktopVersion } from "./server-package";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 
 const CONFIG: SshRemoteRuntimeConfig = {
   id: "remote:test",
   name: "Remote",
   host: "host",
-  port: 22,
   extraArgs: [],
   remoteRepo: "/legacy repo",
   remoteInstallDir: "/opt/llm space/runtime",
@@ -31,7 +31,7 @@ describe("remote server installer", () => {
         return Promise.resolve({
           stdout: JSON.stringify({
             name: "llm-space-server",
-            version: "4.2.0",
+            version: currentDesktopVersion(),
             protocolVersion: 1,
             os: "linux",
             arch: "x64",
@@ -48,7 +48,7 @@ describe("remote server installer", () => {
     });
 
     expect(result.entrypoint).toBe(
-      "/opt/llm space/runtime/versions/4.2.0/bin/llm-space-server"
+      `/opt/llm space/runtime/versions/${currentDesktopVersion()}/bin/llm-space-server`
     );
     expect(commands.some((command) => command.includes("curl -fL"))).toBe(false);
   });

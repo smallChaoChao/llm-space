@@ -8,7 +8,7 @@ export interface SshRemoteRuntimeConfig {
   name: string;
   host: string;
   user?: string;
-  port: number;
+  port?: number;
   identityFile?: string;
   extraArgs: string[];
   remoteRepo: string;
@@ -49,28 +49,22 @@ export function readSshRemoteRuntimeConfig(
     name: env.LLM_SPACE_REMOTE_RUNTIME_NAME?.trim() || `SSH ${host}`,
     host,
     user: _optional(env.LLM_SPACE_REMOTE_SSH_USER),
-    port: _parsePort(
-      env.LLM_SPACE_REMOTE_SSH_PORT,
-      22,
-      "LLM_SPACE_REMOTE_SSH_PORT"
-    ),
+    port: env.LLM_SPACE_REMOTE_SSH_PORT
+      ? _parsePort(env.LLM_SPACE_REMOTE_SSH_PORT, "LLM_SPACE_REMOTE_SSH_PORT")
+      : undefined,
     identityFile: _optionalPath(env.LLM_SPACE_REMOTE_SSH_IDENTITY_FILE),
     extraArgs: _splitExtraArgs(env.LLM_SPACE_REMOTE_SSH_EXTRA_ARGS),
     remoteRepo,
     remoteInstallDir:
       env.LLM_SPACE_REMOTE_INSTALL_DIR?.trim() || "~/.llm-space/remote-runtime",
     remoteHome: env.LLM_SPACE_REMOTE_HOME?.trim() || "~/.llm-space-server",
-    remoteServerPort: _parsePort(
+    remoteServerPort: _parsePortWithFallback(
       env.LLM_SPACE_REMOTE_SERVER_PORT,
       39123,
       "LLM_SPACE_REMOTE_SERVER_PORT"
     ),
     localPort: env.LLM_SPACE_REMOTE_LOCAL_PORT
-      ? _parsePort(
-          env.LLM_SPACE_REMOTE_LOCAL_PORT,
-          0,
-          "LLM_SPACE_REMOTE_LOCAL_PORT"
-        )
+      ? _parsePort(env.LLM_SPACE_REMOTE_LOCAL_PORT, "LLM_SPACE_REMOTE_LOCAL_PORT")
       : undefined,
     makeDefault: active === id,
   };
@@ -102,18 +96,26 @@ function _expandHome(input: string): string {
 
 function _parsePort(
   value: string | undefined,
-  fallback: number,
   name: string
 ): number {
   const raw = value?.trim();
   if (!raw) {
-    return fallback;
+    throw new Error(`${name} is required.`);
   }
   const port = Number(raw);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`${name} must be an integer between 1 and 65535: ${raw}`);
   }
   return port;
+}
+
+function _parsePortWithFallback(
+  value: string | undefined,
+  fallback: number,
+  name: string
+): number {
+  const raw = value?.trim();
+  return raw ? _parsePort(raw, name) : fallback;
 }
 
 function _splitExtraArgs(value: string | undefined): string[] {

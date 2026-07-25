@@ -24,7 +24,11 @@ import type { AnalyticsEvent, AnalyticsStatus } from "./analytics";
 import type { GithubAuthState } from "./auth";
 import type { Command } from "./commands";
 import type { FeatureReminder } from "./feature-reminders";
-import type { RemoteServerDraft, RemoteServerView } from "./remote-servers";
+import type {
+  RemoteServerDraft,
+  RemoteServerStatusChangedPayload,
+  RemoteServerView,
+} from "./remote-servers";
 import type { RuntimeId, RuntimeScopedParams, RuntimeView } from "./runtime";
 import type { SharedImportStatusPayload } from "./shared-import";
 import type {
@@ -591,6 +595,8 @@ export interface DesktopRPCType {
       // Deep-link shared-thread import progress: drives the "importing…" modal
       // and, on success, opens the imported thread. See `bun/deep-link`.
       sharedImportStatusChanged: SharedImportStatusPayload;
+      // Remote SSH connection progress and status updates from the bun side.
+      remoteServerStatusChanged: RemoteServerStatusChangedPayload;
     };
   }>;
 }

@@ -6,10 +6,7 @@ export function buildSshTarget(config: SshRemoteRuntimeConfig): string {
 
 export function buildSshBaseArgs(config: SshRemoteRuntimeConfig): string[] {
   return [
-    "-p",
-    String(config.port),
-    "-o",
-    "BatchMode=yes",
+    ...(config.port ? ["-p", String(config.port)] : []),
     "-o",
     "ServerAliveInterval=15",
     "-o",

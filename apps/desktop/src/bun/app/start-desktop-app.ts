@@ -164,6 +164,9 @@ export async function startDesktopApp(): Promise<DesktopAppRuntime> {
       skillsManager,
       updater,
     });
+    remoteServerManager.setStatusListener((payload) =>
+      getRpc().send.remoteServerStatusChanged(payload)
+    );
     mainWindow = await createMainWindow({ rpc, executeCommand });
 
     // The window + rpc are ready — wire the importer and flush any deep links

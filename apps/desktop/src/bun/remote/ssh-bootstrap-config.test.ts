@@ -32,7 +32,6 @@ describe("readSshRemoteRuntimeConfig", () => {
       id: "remote:ssh-manual",
       name: "SSH host",
       host: "host",
-      port: 22,
       remoteRepo: "/repo",
       remoteInstallDir: "~/.llm-space/remote-runtime",
       remoteHome: "~/.llm-space-server",

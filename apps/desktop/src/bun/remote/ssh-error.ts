@@ -25,6 +25,9 @@ export function formatSshBootstrapFailure({
   const hostKeyFailure = _formatHostKeyFailure(output, target, stage);
   if (hostKeyFailure) return hostKeyFailure;
 
+  const authFailure = _formatAuthenticationFailure(output, target);
+  if (authFailure) return authFailure;
+
   const details = output.trim();
   return [
     `SSH remote runtime bootstrap failed during ${stage}: ${label} exited early.`,
@@ -32,6 +35,31 @@ export function formatSshBootstrapFailure({
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function _formatAuthenticationFailure(
+  output: string,
+  target: string | undefined
+): string | null {
+  if (!_isAuthenticationFailure(output)) return null;
+
+  const targetText = target ? ` for ${target}` : "";
+  return [
+    `SSH authentication failed${targetText}.`,
+    "OpenSSH could not authenticate with the configured keys, password, or passphrase.",
+    "Check ~/.ssh/config, ssh-agent, and any system password or passphrase prompt, then try again.",
+  ].join(" ");
+}
+
+function _isAuthenticationFailure(output: string): boolean {
+  const text = output.toLowerCase();
+  return (
+    /permission denied \([^)]+\)/i.test(output) ||
+    text.includes("too many authentication failures") ||
+    text.includes("bad passphrase") ||
+    text.includes("incorrect passphrase") ||
+    text.includes("no more authentication methods")
+  );
 }
 
 function _formatHostKeyFailure(

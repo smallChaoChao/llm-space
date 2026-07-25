@@ -5,7 +5,10 @@ import { REMOTE_RUNTIME_PROTOCOL_VERSION } from "@llm-space/runtime/remote-proto
 import { findFreePort } from "./port";
 import { spawnManagedProcess, type ManagedProcess } from "./process-utils";
 import { RemoteRuntimeClient } from "./remote-runtime-client";
-import { installRemoteServerPackage } from "./remote-server-installer";
+import {
+  installRemoteServerPackage,
+  RemoteServerInstallError,
+} from "./remote-server-installer";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 import {
   buildRemoteServerArgs,
@@ -20,8 +23,23 @@ export interface SshRemoteRuntimeHandle {
   stop(): Promise<void>;
 }
 
+export interface SshRemoteRuntimeProgress {
+  stage:
+    | "platform-detect"
+    | "server-install"
+    | "server-start"
+    | "tunnel-start"
+    | "health-check";
+  message: string;
+}
+
+export interface SshRemoteRuntimeOptions {
+  onProgress?: (progress: SshRemoteRuntimeProgress) => void;
+}
+
 export async function startSshRemoteRuntime(
-  config: SshRemoteRuntimeConfig
+  config: SshRemoteRuntimeConfig,
+  options: SshRemoteRuntimeOptions = {}
 ): Promise<SshRemoteRuntimeHandle> {
   const token = _generateToken();
   const localPort = config.localPort ?? (await findFreePort());
@@ -30,15 +48,27 @@ export async function startSshRemoteRuntime(
   try {
     let install;
     try {
-      install = await installRemoteServerPackage(config);
+      install = await installRemoteServerPackage(config, undefined, {
+        onProgress: options.onProgress,
+      });
     } catch (error) {
       throw new Error(
-        `SSH remote runtime bootstrap failed during server-install: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        formatSshBootstrapFailure({
+          stage:
+            error instanceof RemoteServerInstallError
+              ? error.stage
+              : "server-install",
+          label: "remote server installer",
+          output: error instanceof Error ? error.message : String(error),
+          target: config.user ? `${config.user}@${config.host}` : config.host,
+        }),
         { cause: error }
       );
     }
+    options.onProgress?.({
+      stage: "server-start",
+      message: "Starting remote runtime",
+    });
     const serverProcess = spawnManagedProcess(
       "remote server",
       "ssh",
@@ -63,6 +93,10 @@ export async function startSshRemoteRuntime(
     processes.push(serverProcess);
     await _waitForProcessAlive(serverProcess, "server-start", config);
 
+    options.onProgress?.({
+      stage: "tunnel-start",
+      message: "Opening SSH tunnel",
+    });
     const tunnelProcess = spawnManagedProcess(
       "ssh tunnel",
       "ssh",
@@ -76,6 +110,10 @@ export async function startSshRemoteRuntime(
       name: config.name,
       baseUrl: `http://127.0.0.1:${localPort}`,
       token,
+    });
+    options.onProgress?.({
+      stage: "health-check",
+      message: "Verifying remote runtime",
     });
     await _waitForHealth(client, processes, config);
 

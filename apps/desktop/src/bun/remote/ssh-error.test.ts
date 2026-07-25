@@ -51,4 +51,30 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
       "SSH remote runtime bootstrap failed during server-start: remote server exited early. bash: bun: command not found"
     );
   });
+
+  test("classifies authentication failures", () => {
+    const message = formatSshBootstrapFailure({
+      stage: "server-install",
+      label: "remote server installer",
+      target: "user@host1",
+      output:
+        "user@host1: Permission denied (publickey,password,keyboard-interactive).",
+    });
+
+    expect(message).toContain("SSH authentication failed for user@host1");
+    expect(message).toContain("~/.ssh/config");
+    expect(message).toContain("ssh-agent");
+  });
+
+  test("does not classify remote filesystem permission errors as authentication", () => {
+    const message = formatSshBootstrapFailure({
+      stage: "server-install",
+      label: "remote server installer",
+      target: "user@host1",
+      output: "mkdir: cannot create directory '/opt/llm-space': Permission denied",
+    });
+
+    expect(message).not.toContain("SSH authentication failed");
+    expect(message).toContain("SSH remote runtime bootstrap failed");
+  });
 });

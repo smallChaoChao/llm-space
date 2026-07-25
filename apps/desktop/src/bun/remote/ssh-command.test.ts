@@ -32,8 +32,6 @@ describe("ssh command builders", () => {
       "-p",
       "2222",
       "-o",
-      "BatchMode=yes",
-      "-o",
       "ServerAliveInterval=15",
       "-o",
       "ServerAliveCountMax=2",
@@ -43,6 +41,32 @@ describe("ssh command builders", () => {
       "jump",
       "user@host",
     ]);
+  });
+
+  test("does not override OpenSSH config by default", () => {
+    const args = buildSshBaseArgs({
+      ...CONFIG,
+      host: "devbox",
+      user: undefined,
+      port: undefined,
+      identityFile: undefined,
+      extraArgs: [],
+    });
+
+    expect(buildSshTarget({ ...CONFIG, host: "devbox", user: undefined })).toBe(
+      "devbox"
+    );
+    expect(args).toEqual([
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=2",
+      "devbox",
+    ]);
+    expect(args).not.toContain("-p");
+    expect(args).not.toContain("22");
+    expect(args).not.toContain("-i");
+    expect(args).not.toContain("BatchMode=yes");
   });
 
   test("builds tunnel args with ExitOnForwardFailure", () => {

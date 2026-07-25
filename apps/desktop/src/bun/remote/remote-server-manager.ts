@@ -10,8 +10,10 @@ import type {
 } from "@llm-space/runtime/runtime";
 
 import type {
+  RemoteConnectionStage,
   RemoteServerConfig,
   RemoteServerDraft,
+  RemoteServerStatusChangedPayload,
   RemoteServerView,
 } from "../../shared/remote-servers";
 
@@ -25,18 +27,31 @@ interface RemoteRuntimeHandle {
 }
 
 type StartSshRemoteRuntime = (
-  config: SshRemoteRuntimeConfig
+  config: SshRemoteRuntimeConfig,
+  options?: {
+    onProgress?: (progress: { stage: string; message: string }) => void;
+  }
 ) => Promise<RemoteRuntimeHandle>;
 
 interface RemoteServersConfigFile {
+  version?: number;
   servers: RemoteServerConfig[];
 }
 
+const REMOTE_SERVERS_CONFIG_VERSION = 2;
+
 interface ConnectedServer {
   status: "connected" | "connecting" | "error";
+  stage: RemoteConnectionStage;
+  stageLabel: string;
+  updatedAt: number;
   handle?: RemoteRuntimeHandle;
   error?: string;
 }
+
+type RemoteServerStatusListener = (
+  payload: RemoteServerStatusChangedPayload
+) => void;
 
 export class RemoteServerManager {
   private _servers: RemoteServerConfig[];
@@ -46,9 +61,14 @@ export class RemoteServerManager {
   constructor(
     private readonly _runtimeRouter: RuntimeRouter,
     private readonly _startSshRemoteRuntime: StartSshRemoteRuntime =
-      startSshRemoteRuntime
+      startSshRemoteRuntime,
+    private _onStatusChanged?: RemoteServerStatusListener
   ) {
     this._servers = this._load();
+  }
+
+  setStatusListener(listener: RemoteServerStatusListener): void {
+    this._onStatusChanged = listener;
   }
 
   listServers(): RemoteServerView[] {
@@ -109,17 +129,35 @@ export class RemoteServerManager {
     }
 
     await this._disconnectOtherServers(id);
-    this._connections.set(id, { status: "connecting" });
+    this._setConnection(id, {
+      status: "connecting",
+      stage: "ssh-check",
+      stageLabel: "Checking SSH access",
+    });
     try {
-      const handle = await this._startSshRemoteRuntime(this._sshConfig(server));
+      const handle = await this._startSshRemoteRuntime(this._sshConfig(server), {
+        onProgress: ({ stage, message }) =>
+          this._setConnection(id, {
+            status: "connecting",
+            stage: _connectionStage(stage),
+            stageLabel: message,
+          }),
+      });
       const runtimeId = this._runtimeId(server.id);
       this._runtimeRouter.register(runtimeId, handle.client);
       this._runtimeRouter.setDefaultRuntime(runtimeId);
-      this._connections.set(id, { status: "connected", handle });
+      this._setConnection(id, {
+        status: "connected",
+        stage: "connected",
+        stageLabel: "Connected",
+        handle,
+      });
       return this.listServers();
     } catch (error) {
-      this._connections.set(id, {
+      this._setConnection(id, {
         status: "error",
+        stage: "error",
+        stageLabel: "Connection failed",
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
@@ -131,20 +169,32 @@ export class RemoteServerManager {
   }
 
   private async _disconnectServer(id: string): Promise<RemoteServerView[]> {
+    let stopError: unknown;
     const connection = this._connections.get(id);
-    if (connection?.handle) {
-      await connection.handle.stop();
-    }
-    const runtimeId = this._runtimeId(id);
-    if (this._runtimeRouter.getDefaultRuntimeId() === runtimeId) {
-      this._runtimeRouter.setDefaultRuntime("local");
-    }
     try {
-      this._runtimeRouter.unregister(runtimeId);
-    } catch {
-      // Runtime may not have been registered or may already be removed.
+      if (connection?.handle) {
+        await connection.handle.stop();
+      }
+    } catch (error) {
+      stopError = error;
+    } finally {
+      const runtimeId = this._runtimeId(id);
+      if (this._runtimeRouter.getDefaultRuntimeId() === runtimeId) {
+        this._runtimeRouter.setDefaultRuntime("local");
+      }
+      try {
+        this._runtimeRouter.unregister(runtimeId);
+      } catch {
+        // Runtime may not have been registered or may already be removed.
+      }
+      this._connections.delete(id);
+      this._emitStatusChanged();
     }
-    this._connections.delete(id);
+    if (stopError) {
+      throw stopError instanceof Error
+        ? stopError
+        : new Error("Remote server stop failed.");
+    }
     return this.listServers();
   }
 
@@ -190,6 +240,11 @@ export class RemoteServerManager {
       runtimeId,
       status: connection?.status ?? "disconnected",
       defaultRuntime: this._runtimeRouter.getDefaultRuntimeId() === runtimeId,
+      ...(connection?.stage ? { stage: connection.stage } : {}),
+      ...(connection?.stageLabel ? { stageLabel: connection.stageLabel } : {}),
+      ...(connection?.updatedAt
+        ? { statusUpdatedAt: connection.updatedAt }
+        : {}),
       ...(connection?.error ? { error: connection.error } : {}),
     };
   }
@@ -247,7 +302,7 @@ export class RemoteServerManager {
       name,
       host,
       user: _optional(draft.user),
-      port: _port(draft.port, 22, "SSH port"),
+      port: draft.port ? _port(draft.port, 0, "SSH port") : undefined,
       identityFile: _optional(draft.identityFile),
       remoteRepo,
       remoteInstallDir,
@@ -274,8 +329,11 @@ export class RemoteServerManager {
     const parsed = JSON.parse(
       readFileSync(this._configPath, "utf8")
     ) as RemoteServersConfigFile;
+    const isLegacy = parsed.version !== REMOTE_SERVERS_CONFIG_VERSION;
     return Array.isArray(parsed.servers)
-      ? parsed.servers.map((server) => this._normalizeLoadedServer(server))
+      ? parsed.servers.map((server) =>
+          this._normalizeLoadedServer(server, { isLegacy })
+        )
       : [];
   }
 
@@ -283,16 +341,27 @@ export class RemoteServerManager {
     mkdirSync(getSettingsDir(), { recursive: true });
     writeFileSync(
       this._configPath,
-      `${JSON.stringify({ servers: this._servers }, null, 2)}\n`,
+      `${JSON.stringify(
+        { version: REMOTE_SERVERS_CONFIG_VERSION, servers: this._servers },
+        null,
+        2
+      )}\n`,
       "utf8"
     );
   }
 
   private _normalizeLoadedServer(
-    server: RemoteServerConfig
+    server: RemoteServerConfig,
+    options: { isLegacy: boolean }
   ): RemoteServerConfig {
     return {
       ...server,
+      port:
+        options.isLegacy && server.port === 22
+          ? undefined
+          : server.port
+          ? _port(server.port, 0, "SSH port")
+          : undefined,
       remoteRepo: _optional(server.remoteRepo),
       remoteInstallDir:
         _optional(server.remoteInstallDir) ?? DEFAULT_REMOTE_INSTALL_DIR,
@@ -303,6 +372,34 @@ export class RemoteServerManager {
         "Remote server port"
       ),
     };
+  }
+
+  private _setConnection(
+    id: string,
+    next: Omit<ConnectedServer, "updatedAt"> & { updatedAt?: number }
+  ): void {
+    this._connections.set(id, {
+      ...next,
+      updatedAt: next.updatedAt ?? Date.now(),
+    });
+    this._emitStatusChanged();
+  }
+
+  private _emitStatusChanged(): void {
+    this._onStatusChanged?.({ servers: this.listServers() });
+  }
+}
+
+function _connectionStage(stage: string): RemoteConnectionStage {
+  switch (stage) {
+    case "platform-detect":
+    case "server-install":
+    case "server-start":
+    case "tunnel-start":
+    case "health-check":
+      return stage;
+    default:
+      return "ssh-check";
   }
 }
 

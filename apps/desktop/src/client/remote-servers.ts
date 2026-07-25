@@ -1,23 +1,43 @@
 import { electrobun } from "@/lib/electrobun";
 import type {
   RemoteServerDraft,
+  RemoteServerStatusChangedPayload,
   RemoteServerView,
 } from "@/shared/remote-servers";
 import type { RuntimeId, RuntimeView } from "@/shared/runtime";
 
 const REMOTE_SERVERS_CHANGED_EVENT = "llm-space:remote-servers-changed";
 
-export function notifyRemoteServersChanged(): void {
+export function notifyRemoteServersChanged(servers?: RemoteServerView[]): void {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(REMOTE_SERVERS_CHANGED_EVENT));
+  window.dispatchEvent(
+    new CustomEvent(REMOTE_SERVERS_CHANGED_EVENT, { detail: { servers } })
+  );
 }
 
 export function subscribeRemoteServersChanged(
-  listener: () => void
+  listener: (servers?: RemoteServerView[]) => void
 ): () => void {
   if (typeof window === "undefined") return () => undefined;
-  window.addEventListener(REMOTE_SERVERS_CHANGED_EVENT, listener);
-  return () => window.removeEventListener(REMOTE_SERVERS_CHANGED_EVENT, listener);
+  const handle = (event: Event) => {
+    listener(
+      (event as CustomEvent<{ servers?: RemoteServerView[] }>).detail?.servers
+    );
+  };
+  window.addEventListener(REMOTE_SERVERS_CHANGED_EVENT, handle);
+  return () => window.removeEventListener(REMOTE_SERVERS_CHANGED_EVENT, handle);
+}
+
+export function subscribeRemoteServerStatusChanged(
+  listener: (payload: RemoteServerStatusChangedPayload) => void
+): () => void {
+  const rpc = _rpc();
+  const handle = (payload: RemoteServerStatusChangedPayload) => {
+    notifyRemoteServersChanged(payload.servers);
+    listener(payload);
+  };
+  rpc.addMessageListener("remoteServerStatusChanged", handle);
+  return () => rpc.removeMessageListener("remoteServerStatusChanged", handle);
 }
 
 function _rpc() {

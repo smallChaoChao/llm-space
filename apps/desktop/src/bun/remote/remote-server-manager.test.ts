@@ -9,6 +9,10 @@ import { RuntimeRouter } from "@llm-space/runtime/runtime";
 import { RemoteServerManager } from "./remote-server-manager";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 
+type StartSshRemoteRuntime = ConstructorParameters<
+  typeof RemoteServerManager
+>[1];
+
 function _localRuntime(): RuntimeClient {
   return {
     info: () => ({
@@ -34,14 +38,16 @@ function _remoteRuntime(id: SshRemoteRuntimeConfig["id"]): RuntimeClient {
 }
 
 function _manager(
-  start: (config: SshRemoteRuntimeConfig) => Promise<{
-    client: RuntimeClient;
-    stop(): Promise<void>;
-  }>,
-  home = mkdtempSync(path.join(tmpdir(), "llm-space-remote-manager-test-"))
+  start: StartSshRemoteRuntime,
+  home = mkdtempSync(path.join(tmpdir(), "llm-space-remote-manager-test-")),
+  onStatusChanged?: ConstructorParameters<typeof RemoteServerManager>[2]
 ): RemoteServerManager {
   process.env.LLM_SPACE_HOME = home;
-  return new RemoteServerManager(new RuntimeRouter(_localRuntime()), start);
+  return new RemoteServerManager(
+    new RuntimeRouter(_localRuntime()),
+    start,
+    onStatusChanged
+  );
 }
 
 describe("RemoteServerManager", () => {
@@ -121,5 +127,120 @@ describe("RemoteServerManager", () => {
     expect(manager.listServers()[0]?.remoteInstallDir).toBe(
       "~/.llm-space/remote-runtime"
     );
+    expect(manager.listServers()[0]?.port).toBeUndefined();
+  });
+
+  test("preserves explicit port 22 in current config version", () => {
+    const home = mkdtempSync(
+      path.join(tmpdir(), "llm-space-remote-manager-test-")
+    );
+    const settingsDir = path.join(home, "settings");
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(
+      path.join(settingsDir, "remote-servers.json"),
+      `${JSON.stringify(
+        {
+          version: 2,
+          servers: [
+            {
+              id: "explicit-22",
+              kind: "ssh",
+              name: "explicit 22",
+              host: "host",
+              port: 22,
+              remoteHome: "~/.llm-space-server",
+              remoteServerPort: 39123,
+              remoteInstallDir: "~/.llm-space/remote-runtime",
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          ],
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const manager = _manager(
+      () => {
+        throw new Error("unexpected connect");
+      },
+      home
+    );
+
+    expect(manager.listServers()[0]?.port).toBe(22);
+  });
+
+  test("cleans local state when disconnect stop fails", async () => {
+    const statuses: string[] = [];
+    const manager = _manager(
+      (config) =>
+        Promise.resolve({
+          client: _remoteRuntime(config.id),
+          stop: () => Promise.reject(new Error("stop failed")),
+        }),
+      undefined,
+      ({ servers }) => statuses.push(servers[0]?.status ?? "missing")
+    );
+
+    const [server] = manager.addServer({ name: "host", host: "host" });
+    await manager.connectServer(server.id);
+    try {
+      await manager.disconnectServer(server.id);
+      throw new Error("disconnect should fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("stop failed");
+    }
+
+    const [view] = manager.listServers();
+    expect(view?.status).toBe("disconnected");
+    expect(view?.defaultRuntime).toBe(false);
+    expect(statuses.at(-1)).toBe("disconnected");
+  });
+
+  test("publishes connection progress stages", async () => {
+    const stages: string[] = [];
+    const manager = _manager(
+      (config, options) => {
+        options?.onProgress?.({
+          stage: "server-install",
+          message: "Downloading remote runtime package",
+        });
+        options?.onProgress?.({
+          stage: "server-start",
+          message: "Starting remote runtime",
+        });
+        options?.onProgress?.({
+          stage: "tunnel-start",
+          message: "Opening SSH tunnel",
+        });
+        options?.onProgress?.({
+          stage: "health-check",
+          message: "Verifying remote runtime",
+        });
+        return Promise.resolve({
+          client: _remoteRuntime(config.id),
+          stop: () => Promise.resolve(),
+        });
+      },
+      undefined,
+      ({ servers }) => {
+        const stage = servers[0]?.stage;
+        if (stage) stages.push(stage);
+      }
+    );
+
+    const [server] = manager.addServer({ name: "host", host: "host" });
+    const next = await manager.connectServer(server.id);
+
+    expect(stages).toContain("ssh-check");
+    expect(stages).toContain("server-install");
+    expect(stages).toContain("server-start");
+    expect(stages).toContain("tunnel-start");
+    expect(stages).toContain("health-check");
+    expect(stages).toContain("connected");
+    expect(next[0]?.stageLabel).toBe("Connected");
   });
 });

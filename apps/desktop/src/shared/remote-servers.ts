@@ -16,7 +16,7 @@ export interface RemoteServerDraft {
 export interface RemoteServerConfig extends RemoteServerDraft {
   id: string;
   kind: "ssh";
-  port: number;
+  port?: number;
   remoteInstallDir: string;
   remoteHome: string;
   remoteServerPort: number;
@@ -24,9 +24,27 @@ export interface RemoteServerConfig extends RemoteServerDraft {
   updatedAt: number;
 }
 
+export type RemoteConnectionStage =
+  | "idle"
+  | "ssh-check"
+  | "platform-detect"
+  | "server-install"
+  | "server-start"
+  | "tunnel-start"
+  | "health-check"
+  | "connected"
+  | "error";
+
 export interface RemoteServerView extends RemoteServerConfig {
   runtimeId: RuntimeId;
   status: "connected" | "connecting" | "disconnected" | "error";
   defaultRuntime: boolean;
+  stage?: RemoteConnectionStage;
+  stageLabel?: string;
+  statusUpdatedAt?: number;
   error?: string;
+}
+
+export interface RemoteServerStatusChangedPayload {
+  servers: RemoteServerView[];
 }

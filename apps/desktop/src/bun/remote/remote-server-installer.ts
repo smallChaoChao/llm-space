@@ -23,11 +23,43 @@ export type RemoteCommandRunner = (
   timeoutMs?: number
 ) => Promise<{ stdout: string; stderr: string }>;
 
+export interface RemoteServerInstallOptions {
+  onProgress?: (progress: {
+    stage: "platform-detect" | "server-install";
+    message: string;
+  }) => void;
+}
+
+export class RemoteServerInstallError extends Error {
+  constructor(
+    readonly stage: "platform-detect" | "server-install",
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = "RemoteServerInstallError";
+  }
+}
+
 export async function installRemoteServerPackage(
   config: SshRemoteRuntimeConfig,
-  run: RemoteCommandRunner = execRemoteCommand
+  run: RemoteCommandRunner = execRemoteCommand,
+  options: RemoteServerInstallOptions = {}
 ): Promise<RemoteServerInstallResult> {
-  const platform = await detectRemoteServerPlatform(config, run);
+  options.onProgress?.({
+    stage: "platform-detect",
+    message: "Detecting remote platform",
+  });
+  let platform;
+  try {
+    platform = await detectRemoteServerPlatform(config, run);
+  } catch (error) {
+    throw new RemoteServerInstallError(
+      "platform-detect",
+      error instanceof Error ? error.message : String(error),
+      { cause: error }
+    );
+  }
   const version = currentDesktopVersion();
   const installDir = config.remoteInstallDir;
   const packageDir = `${installDir}/versions/${version}`;
@@ -40,17 +72,33 @@ export async function installRemoteServerPackage(
   const entrypoint = `${packageDir}/bin/llm-space-server`;
 
   if (await _hasInstalledPackage(config, run, manifestPath, version, platform)) {
+    options.onProgress?.({
+      stage: "server-install",
+      message: "Remote runtime is already installed",
+    });
     await _pointCurrentAtVersion(config, run, installDir, version);
     return { entrypoint, version, platform };
   }
 
-  await run(config, buildInstallCommand({
-    installDir,
-    version,
-    assetName,
-    assetUrl,
-    packageDir,
-  }), 120_000);
+  options.onProgress?.({
+    stage: "server-install",
+    message: "Downloading remote runtime package",
+  });
+  try {
+    await run(config, buildInstallCommand({
+      installDir,
+      version,
+      assetName,
+      assetUrl,
+      packageDir,
+    }), 120_000);
+  } catch (error) {
+    throw new RemoteServerInstallError(
+      "server-install",
+      error instanceof Error ? error.message : String(error),
+      { cause: error }
+    );
+  }
 
   if (!(await _hasInstalledPackage(config, run, manifestPath, version, platform))) {
     throw new Error(`Remote server package install verification failed: ${assetName}`);

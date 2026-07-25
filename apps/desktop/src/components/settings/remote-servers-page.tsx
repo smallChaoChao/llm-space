@@ -12,7 +12,7 @@ import {
   Server,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -21,6 +21,7 @@ import {
   disconnectRemoteServer,
   listRemoteServers,
   removeRemoteServer,
+  subscribeRemoteServerStatusChanged,
   updateRemoteServer,
 } from "@/client/remote-servers";
 import type {
@@ -53,7 +54,7 @@ function _emptyForm(): FormState {
     name: "",
     host: "",
     user: "",
-    port: "22",
+    port: "",
     identityFile: "",
     remoteRepo: "",
     remoteInstallDir: DEFAULT_REMOTE_INSTALL_DIR,
@@ -71,6 +72,7 @@ export function RemoteServersPage({
   onDisconnected?: (runtimeId: RuntimeId) => void;
 }) {
   const [servers, setServers] = useState<RemoteServerView[]>([]);
+  const serversRef = useRef<RemoteServerView[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -80,15 +82,20 @@ export function RemoteServersPage({
     [selectedId, servers]
   );
 
+  const updateServers = useCallback((next: RemoteServerView[]) => {
+    serversRef.current = next;
+    setServers(next);
+  }, []);
+
   const refresh = useCallback(async () => {
     const next = await listRemoteServers();
-    setServers(next);
+    updateServers(next);
     setSelectedId((current) =>
       current && next.some((server) => server.id === current)
         ? current
         : (next[0]?.id ?? null)
     );
-  }, []);
+  }, [updateServers]);
 
   useEffect(() => {
     void refresh().catch((error) =>
@@ -99,6 +106,19 @@ export function RemoteServersPage({
     );
   }, [refresh]);
 
+  useEffect(
+    () =>
+      subscribeRemoteServerStatusChanged(({ servers }) => {
+        updateServers(servers);
+        setSelectedId((current) =>
+          current && servers.some((server) => server.id === current)
+            ? current
+            : (servers[0]?.id ?? null)
+        );
+      }),
+    [updateServers]
+  );
+
   const save = async () => {
     if (!form) return;
     try {
@@ -106,7 +126,7 @@ export function RemoteServersPage({
       const next = form.id
         ? await updateRemoteServer(form.id, draft)
         : await addRemoteServer(draft);
-      setServers(next);
+      updateServers(next);
       const nextId = form.id ?? next.at(-1)?.id ?? null;
       setSelectedId(nextId);
       setForm(null);
@@ -130,7 +150,7 @@ export function RemoteServersPage({
         (server) => server.id === id
       )?.runtimeId;
       const next = await action(id);
-      setServers(next);
+      updateServers(next);
       setSelectedId(id);
       if (options.closeOnConnected) {
         const connected = next.find((server) => server.id === id);
@@ -140,7 +160,8 @@ export function RemoteServersPage({
         onDisconnected?.(previousRuntimeId);
       }
     } catch (error) {
-      toast.error("Remote server action failed", {
+      const failed = serversRef.current.find((server) => server.id === id);
+      toast.error(_failureTitle(failed), {
         description:
           error instanceof Error ? error.message : "Please try again.",
       });
@@ -216,7 +237,8 @@ export function RemoteServersPage({
                       </span>
                       <span className="text-muted-foreground block truncate text-xs">
                         {server.user ? `${server.user}@` : ""}
-                        {server.host}:{server.port}
+                        {server.host}
+                        {server.port ? `:${server.port}` : ""}
                       </span>
                     </span>
                     {server.status === "connected" ? (
@@ -293,21 +315,32 @@ function RemoteServerDetails({
         <h3 className="text-base font-medium">{server.name}</h3>
         <p className="text-muted-foreground text-sm">
           {server.user ? `${server.user}@` : ""}
-          {server.host}:{server.port}
+          {server.host}
+          {server.port ? `:${server.port}` : ""}
         </p>
       </div>
       <div className="grid gap-2 rounded-lg border p-3 text-sm">
         <Info label="Status" value={server.status} />
+        {server.stageLabel ? (
+          <Info label="Progress" value={server.stageLabel} />
+        ) : null}
         <Info label="Runtime" value={server.runtimeId} />
-        <Info label="Install dir" value={server.remoteInstallDir} />
-        <Info label="Remote repo" value={server.remoteRepo ?? "Legacy only"} />
-        <Info label="Remote home" value={server.remoteHome} />
-        <Info label="Server port" value={String(server.remoteServerPort)} />
-        <Info
-          label="Local port"
-          value={server.localPort ? String(server.localPort) : "Auto"}
-        />
       </div>
+      <details className="rounded-lg border p-3 text-sm">
+        <summary className="cursor-pointer font-medium">Advanced details</summary>
+        <div className="mt-3 grid gap-2">
+          <Info label="SSH port" value={server.port ? String(server.port) : "SSH config"} />
+          <Info label="Identity file" value={server.identityFile ?? "SSH config"} />
+          <Info label="Install dir" value={server.remoteInstallDir} />
+          <Info label="Remote repo" value={server.remoteRepo ?? "Packaged runtime"} />
+          <Info label="Remote home" value={server.remoteHome} />
+          <Info label="Server port" value={String(server.remoteServerPort)} />
+          <Info
+            label="Local port"
+            value={server.localPort ? String(server.localPort) : "Auto"}
+          />
+        </div>
+      </details>
       {server.error ? (
         <p className="text-destructive text-sm">{server.error}</p>
       ) : null}
@@ -488,7 +521,7 @@ function _form(server: RemoteServerView): FormState {
     name: server.name,
     host: server.host,
     user: server.user ?? "",
-    port: String(server.port),
+    port: server.port ? String(server.port) : "",
     identityFile: server.identityFile ?? "",
     remoteRepo: server.remoteRepo ?? "",
     remoteInstallDir: server.remoteInstallDir,
@@ -504,4 +537,9 @@ function _number(value: string): number | undefined {
   const parsed = Number(trimmed);
   if (!Number.isInteger(parsed)) throw new Error(`Invalid number: ${value}`);
   return parsed;
+}
+
+function _failureTitle(server: RemoteServerView | undefined): string {
+  if (!server?.stageLabel) return "Remote server action failed";
+  return `${server.stageLabel} failed`;
 }
