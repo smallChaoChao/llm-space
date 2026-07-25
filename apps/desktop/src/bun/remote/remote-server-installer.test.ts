@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import {
   buildInstallFromArchiveCommand,
   buildInstallCommand,
-  cleanRemoteRuntimeInstallArtifacts,
   installRemoteServerPackage,
 } from "./remote-server-installer";
 import { currentDesktopVersion } from "./server-package";
@@ -117,6 +116,60 @@ describe("remote server installer", () => {
     expect(command).not.toContain("/home/user/.llm-space-server");
   });
 
+
+  test("expands tilde install directories on the remote shell", async () => {
+    const tildeConfig = {
+      ...CONFIG,
+      remoteInstallDir: "~/.llm-space/remote-runtime",
+    };
+    const commands: string[] = [];
+
+    await installRemoteServerPackage(tildeConfig, (_config, command) => {
+      commands.push(command);
+      if (command.includes("uname")) {
+        return Promise.resolve({ stdout: "Linux\nx86_64\n", stderr: "" });
+      }
+      if (command.startsWith("cat ")) {
+        expect(command).toContain('cat "$HOME"/');
+        expect(command).not.toContain("cat '~/.llm-space");
+        if (commands.filter((item) => item.startsWith("cat ")).length === 1) {
+          return Promise.reject(new Error("missing manifest"));
+        }
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            name: "llm-space-server",
+            version: currentDesktopVersion(),
+            protocolVersion: 1,
+            os: "linux",
+            arch: "x64",
+            entrypoint: "bin/llm-space-server",
+            createdAt: "2026-07-21T00:00:00.000Z",
+          }),
+          stderr: "",
+        });
+      }
+      if (command.includes("curl -fL")) {
+        expect(command).toContain('INSTALL_DIR="$HOME"/');
+        expect(command).not.toContain("INSTALL_DIR='~/.llm-space/remote-runtime'");
+        return Promise.resolve({ stdout: "", stderr: "" });
+      }
+      if (command.startsWith("test -x ")) {
+        expect(command).toContain('test -x "$HOME"/');
+        expect(command).not.toContain("test -x '~/.llm-space");
+        return Promise.resolve({ stdout: "", stderr: "" });
+      }
+      if (command.includes("ln -sfn")) {
+        expect(command).toContain('"$HOME"/');
+        return Promise.resolve({ stdout: "", stderr: "" });
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    expect(commands.some((command) => command.includes('INSTALL_DIR="$HOME"/'))).toBe(
+      true
+    );
+  });
+
   test("builds install-from-archive command without network access", () => {
     const command = buildInstallFromArchiveCommand({
       installDir: "/opt/llm space/it's",
@@ -137,26 +190,6 @@ describe("remote server installer", () => {
     expect(command).not.toContain("curl");
     expect(command).not.toContain("wget");
     expect(command).not.toContain("ASSET_URL");
-  });
-
-  test("cleans only remote runtime install artifacts", async () => {
-    const commands: string[] = [];
-    await cleanRemoteRuntimeInstallArtifacts(CONFIG, (_config, command, timeoutMs) => {
-      commands.push(command);
-      expect(timeoutMs).toBe(30_000);
-      return Promise.resolve({ stdout: "", stderr: "" });
-    });
-
-    expect(commands).toHaveLength(1);
-    const command = commands[0];
-    expect(command).toContain("INSTALL_DIR='/opt/llm space/runtime'");
-    expect(command).toContain('"$INSTALL_DIR/versions"');
-    expect(command).toContain('"$INSTALL_DIR/downloads"');
-    expect(command).toContain('"$INSTALL_DIR/current"');
-    expect(command).toContain('"$INSTALL_DIR"/.tmp-*');
-    expect(command).toContain('"$INSTALL_DIR"/.pkg-*');
-    expect(command).toContain('"$INSTALL_DIR"/.old-*');
-    expect(command).not.toContain(CONFIG.remoteHome);
   });
 
   test("describes package download timeouts with remote network probe", async () => {

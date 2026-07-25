@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
 
 let scenario:
-  | "missing-then-success"
+  | "missing-runtime-binary"
   | "non-runtime-failure"
-  | "missing-then-missing";
+  | "success";
 let installCalls = 0;
-let cleanCalls = 0;
 let connectCalls = 0;
 let stopCalls = 0;
+let diagnosticCalls = 0;
 
 await mock.module("./port", () => ({
   findFreePort: () => Promise.resolve(40000),
@@ -27,9 +27,15 @@ await mock.module("./remote-server-installer", () => ({
       platform: { os: "linux", arch: "x64" },
     });
   },
-  cleanRemoteRuntimeInstallArtifacts: () => {
-    cleanCalls += 1;
-    return Promise.resolve();
+}));
+
+await mock.module("./remote-exec", () => ({
+  execRemoteCommand: () => {
+    diagnosticCalls += 1;
+    return Promise.resolve({
+      stdout: "USER=test\nHOME=/home/test\nPWD=/home/test\nentrypoint_exists:1\nentrypoint_executable:1\n",
+      stderr: "",
+    });
   },
 }));
 
@@ -59,8 +65,8 @@ await mock.module("./process-utils", () => ({
     const attempt = installCalls;
     const missing =
       label === "remote server" &&
-      (scenario === "missing-then-missing" ||
-        (scenario === "missing-then-success" && attempt === 1));
+      scenario === "missing-runtime-binary" &&
+      attempt === 1;
     const nonRuntimeFailure =
       label === "remote server" &&
       scenario === "non-runtime-failure" &&
@@ -100,27 +106,34 @@ const CONFIG: SshRemoteRuntimeConfig = {
 };
 
 beforeEach(() => {
-  scenario = "missing-then-success";
+  scenario = "missing-runtime-binary";
   installCalls = 0;
-  cleanCalls = 0;
   connectCalls = 0;
   stopCalls = 0;
+  diagnosticCalls = 0;
 });
 
-describe("startSshRemoteRuntime reinstall retry", () => {
-  test("cleans install artifacts and retries once when the runtime binary is missing", async () => {
-    const progress: string[] = [];
-    const handle = await startSshRemoteRuntime(CONFIG, {
-      onProgress: ({ message }) => progress.push(message),
-    });
+describe("startSshRemoteRuntime", () => {
+  test("does not reinstall when the runtime binary is missing", async () => {
+    await startSshRemoteRuntime(CONFIG).then(
+      () => {
+        throw new Error("connect should fail");
+      },
+      (error) => {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain(
+          "Remote runtime binary is missing"
+        );
+        expect((error as Error).message).toContain("Remote diagnostics:");
+        expect((error as Error).message).toContain("entrypoint_exists:1");
+        expect((error as Error).message).not.toContain("reinstall retry");
+      }
+    );
 
-    expect(installCalls).toBe(2);
-    expect(cleanCalls).toBe(1);
-    expect(connectCalls).toBe(1);
+    expect(installCalls).toBe(1);
+    expect(diagnosticCalls).toBe(1);
+    expect(connectCalls).toBe(0);
     expect(stopCalls).toBeGreaterThanOrEqual(1);
-    expect(progress).toContain("Remote runtime binary missing; reinstalling package");
-
-    await handle.stop();
   });
 
   test("does not reinstall for non-runtime startup failures", async () => {
@@ -137,25 +150,6 @@ describe("startSshRemoteRuntime reinstall retry", () => {
     );
 
     expect(installCalls).toBe(1);
-    expect(cleanCalls).toBe(0);
-  });
-
-  test("does not retry indefinitely when reinstall still leaves the binary missing", async () => {
-    scenario = "missing-then-missing";
-
-    await startSshRemoteRuntime(CONFIG).then(
-      () => {
-        throw new Error("connect should fail");
-      },
-      (error) => {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain(
-          "Remote runtime binary was missing and reinstall retry failed"
-        );
-      }
-    );
-
-    expect(installCalls).toBe(2);
-    expect(cleanCalls).toBe(1);
+    expect(diagnosticCalls).toBe(0);
   });
 });

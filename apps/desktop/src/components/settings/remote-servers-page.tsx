@@ -45,7 +45,6 @@ import type {
 import type { RuntimeId } from "@/shared/runtime";
 
 import {
-  remoteConnectionAction,
   remoteConnectionFlow,
   remoteStageSummary,
 } from "./remote-server-display";
@@ -300,20 +299,6 @@ export function RemoteServersPage({
                       server.status === "connecting" ? (
                       <Loader2 className="size-4 shrink-0 animate-spin" />
                     ) : null}
-                    <RemoteConnectionButton
-                      server={server}
-                      busy={busyId === server.id}
-                      onConnect={() =>
-                        void run(server.id, connectRemoteServer, {
-                          closeOnConnected: true,
-                        })
-                      }
-                      onDisconnect={() =>
-                        void run(server.id, disconnectRemoteServer, {
-                          notifyDisconnected: true,
-                        })
-                      }
-                    />
                   </div>
                 ))}
               </div>
@@ -397,12 +382,6 @@ function RemoteServerDetails({
             {server.host}
           </p>
         </div>
-        <RemoteConnectionButton
-          server={server}
-          busy={busy}
-          onConnect={onConnect}
-          onDisconnect={onDisconnect}
-        />
       </div>
       <div className="grid gap-2 rounded-lg border p-3 text-sm">
         <Info label="Status" value={server.status} />
@@ -417,6 +396,31 @@ function RemoteServerDetails({
         <p className="text-destructive text-sm">{server.error}</p>
       ) : null}
       <div className="flex flex-wrap gap-2">
+        {server.status === "connected" ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={onDisconnect}
+          >
+            Disconnect
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            disabled={
+              busy ||
+              server.status === "connecting" ||
+              server.status === "trust-required"
+            }
+            onClick={onConnect}
+          >
+            {server.status === "connecting" ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : null}
+            {server.status === "connecting" ? "Connecting" : "Connect"}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="secondary"
@@ -439,39 +443,6 @@ function RemoteServerDetails({
         />
       ) : null}
     </div>
-  );
-}
-
-function RemoteConnectionButton({
-  server,
-  busy,
-  onConnect,
-  onDisconnect,
-}: {
-  server: RemoteServerView;
-  busy: boolean;
-  onConnect: () => void;
-  onDisconnect: () => void;
-}) {
-  const connectionAction = remoteConnectionAction(server, busy);
-  return (
-    <Button
-      size="sm"
-      variant={
-        connectionAction.action === "disconnect" ? "secondary" : "default"
-      }
-      disabled={connectionAction.disabled}
-      aria-label={`${connectionAction.label} ${server.name}`}
-      onClick={() => {
-        if (connectionAction.action === "connect") onConnect();
-        if (connectionAction.action === "disconnect") onDisconnect();
-      }}
-    >
-      {connectionAction.label === "Connecting" ? (
-        <Loader2 className="size-3.5 animate-spin" />
-      ) : null}
-      {connectionAction.label}
-    </Button>
   );
 }
 

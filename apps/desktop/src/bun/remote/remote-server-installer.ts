@@ -10,7 +10,7 @@ import {
   serverPackageChecksumUrl,
 } from "./server-package";
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
-import { buildSshTarget, shellQuote } from "./ssh-command";
+import { buildSshTarget, joinRemotePath, shellPath, shellQuote } from "./ssh-command";
 
 export interface RemoteServerInstallResult {
   entrypoint: string;
@@ -80,16 +80,16 @@ export async function installRemoteServerPackage(
   }
   const version = currentDesktopVersion();
   const installDir = config.remoteInstallDir;
-  const packageDir = `${installDir}/versions/${version}`;
-  const manifestPath = `${packageDir}/server-manifest.json`;
+  const packageDir = joinRemotePath(installDir, "versions", version);
+  const manifestPath = joinRemotePath(packageDir, "server-manifest.json");
   const assetName = serverPackageAssetName({ version, ...platform });
   const assetUrl = serverPackageAssetUrl({
     baseUrl: process.env.LLM_SPACE_SERVER_PACKAGE_BASE_URL,
     target: { version, ...platform },
   });
   const checksumUrl = serverPackageChecksumUrl(assetUrl);
-  const remoteArchivePath = `${installDir}/downloads/${assetName}`;
-  const entrypoint = `${packageDir}/bin/llm-space-server`;
+  const remoteArchivePath = joinRemotePath(installDir, "downloads", assetName);
+  const entrypoint = joinRemotePath(packageDir, "bin", "llm-space-server");
 
   if (
     await _hasInstalledPackage(
@@ -168,23 +168,6 @@ export async function detectRemoteServerPlatform(
   return parseRemotePlatform({ unameS, unameM });
 }
 
-export async function cleanRemoteRuntimeInstallArtifacts(
-  config: SshRemoteRuntimeConfig,
-  run: RemoteCommandRunner = execRemoteCommand
-): Promise<void> {
-  const installDir = shellQuote(config.remoteInstallDir);
-  await run(
-    config,
-    [
-      "set -e",
-      `INSTALL_DIR=${installDir}`,
-      'mkdir -p "$INSTALL_DIR"',
-      'rm -rf "$INSTALL_DIR/versions" "$INSTALL_DIR/downloads" "$INSTALL_DIR/current" "$INSTALL_DIR"/.tmp-* "$INSTALL_DIR"/.pkg-* "$INSTALL_DIR"/.old-*',
-    ].join(" && "),
-    30_000
-  );
-}
-
 export function buildInstallCommand(input: {
   installDir: string;
   version: string;
@@ -204,7 +187,7 @@ export function buildDownloadAndInstallCommand(input: {
   packageDir: string;
   packageDownloadMaxTimeSeconds?: number;
 }): string {
-  const installDir = shellQuote(input.installDir);
+  const installDir = shellPath(input.installDir);
   const assetName = shellQuote(input.assetName);
   const assetUrl = shellQuote(input.assetUrl);
   const packageDownloadMaxTimeSeconds =
@@ -238,10 +221,10 @@ export function buildInstallFromArchiveCommand(input: {
   assetName: string;
   packageDir: string;
 }): string {
-  const installDir = shellQuote(input.installDir);
+  const installDir = shellPath(input.installDir);
   const version = shellQuote(input.version);
   const assetName = shellQuote(input.assetName);
-  const packageDir = shellQuote(input.packageDir);
+  const packageDir = shellPath(input.packageDir);
   return [
     "set -e",
     `INSTALL_DIR=${installDir}`,
@@ -379,7 +362,7 @@ async function _hasInstalledPackage(
   platform: { os: "linux"; arch: "x64" | "arm64" }
 ): Promise<boolean> {
   try {
-    const result = await run(config, `cat ${shellQuote(manifestPath)}`, 10_000);
+    const result = await run(config, `cat ${shellPath(manifestPath)}`, 10_000);
     const manifest = JSON.parse(result.stdout) as ServerPackageManifest;
     const manifestMatches =
       manifest.name === "llm-space-server" &&
@@ -389,7 +372,7 @@ async function _hasInstalledPackage(
       manifest.arch === platform.arch &&
       Boolean(manifest.entrypoint);
     if (!manifestMatches) return false;
-    await run(config, `test -x ${shellQuote(entrypoint)}`, 10_000);
+    await run(config, `test -x ${shellPath(entrypoint)}`, 10_000);
     return true;
   } catch {
     return false;
@@ -404,9 +387,9 @@ async function _pointCurrentAtVersion(
 ): Promise<void> {
   await run(
     config,
-    `mkdir -p ${shellQuote(installDir)} && ln -sfn ${shellQuote(
+    `mkdir -p ${shellPath(installDir)} && ln -sfn ${shellQuote(
       `versions/${version}`
-    )} ${shellQuote(`${installDir}/current`)}`,
+    )} ${shellPath(joinRemotePath(installDir, "current"))}`,
     10_000
   );
 }

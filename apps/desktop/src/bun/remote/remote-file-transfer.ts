@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 
 import type { SshRemoteRuntimeConfig } from "./ssh-bootstrap-config";
-import { buildSshBaseArgs, shellQuote } from "./ssh-command";
+import { buildSshBaseArgs, shellPath } from "./ssh-command";
 
 export interface RemoteFileUploadInput {
   config: SshRemoteRuntimeConfig;
@@ -22,9 +22,9 @@ export async function uploadRemoteFile({
   const remoteTmpPath = `${remotePath}.upload-${process.pid}-${Date.now()}`;
   const command = [
     "set -e",
-    `mkdir -p ${shellQuote(_dirname(remotePath))}`,
-    `cat > ${shellQuote(remoteTmpPath)}`,
-    `mv ${shellQuote(remoteTmpPath)} ${shellQuote(remotePath)}`,
+    `mkdir -p ${shellPath(_dirname(remotePath))}`,
+    `cat > ${shellPath(remoteTmpPath)}`,
+    `mv ${shellPath(remoteTmpPath)} ${shellPath(remotePath)}`,
   ].join(" && ");
   const child = spawn("ssh", [...buildSshBaseArgs(config), command], {
     stdio: ["pipe", "pipe", "pipe"],

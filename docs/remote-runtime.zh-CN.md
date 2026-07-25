@@ -71,9 +71,9 @@ LLM Space 在检测平台和准备 runtime 时可能会调用多次短 `ssh` 命
 
 Remote Servers 页面还会展示 **Connection flow** 时间线，包含 SSH、Host key、Platform、Install runtime、Start server、Tunnel 和 Health check。连接失败时，失败步骤会保留详细信息，帮助判断失败发生在 SSH 认证、包安装、server 启动、隧道创建，还是 runtime 健康检查。
 
-复用已安装的远端 runtime 包之前，LLM Space 会同时校验 `server-manifest.json` 和可执行文件 `bin/llm-space-server`。如果之前安装留下了残缺版本目录，例如 manifest 存在但二进制缺失或不可执行，本次连接会把它视为未完整安装并自动重新安装该版本。
+复用已安装的远端 runtime 包之前，LLM Space 会同时校验 `server-manifest.json` 和可执行文件 `bin/llm-space-server`。如果之前安装留下了残缺版本目录，例如 manifest 存在但二进制缺失或不可执行，本次连接会在安装阶段把它视为未完整安装并重新安装该版本。
 
-如果二进制在安装后、启动或 health check 前消失，或者失去可执行权限，LLM Space 会在同一次连接中清理一次远端安装产物并重新安装。清理范围仅限安装目录（默认 `~/.llm-space/remote-runtime`）下的 `versions/`、`downloads/`、`current` 和安装临时目录，不会删除远端 runtime home（默认 `~/.llm-space-server`），因此 workspace 文件和 runtime 配置会保留。
+默认安装目录 `~/.llm-space/remote-runtime` 会在 SSH 服务器上解析为该用户的 `$HOME/.llm-space/remote-runtime`；它不会在本机解析，也不应该在服务器上创建字面量 `~/` 目录。启动或 health check 失败不会触发自动重装 retry。如果安装后 `bin/llm-space-server` 缺失或不可执行，LLM Space 会直接报错，并附带 best-effort 远端诊断快照，包括 `$HOME`、`PWD`、安装目录、entrypoint 是否存在、是否可执行、manifest 内容，以及可能存在的字面量 `~/` 安装产物。重新连接前，优先检查安装目录权限、磁盘空间、外部清理任务和遗留的字面量 `~/` 目录。
 
 ## Host key 校验失败
 

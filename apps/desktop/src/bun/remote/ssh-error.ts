@@ -53,7 +53,7 @@ function _formatMissingRuntimeBinary(output: string): string | null {
       ? "Remote runtime binary is missing."
       : "Remote runtime binary is not executable.",
     `${failure.path} does not exist or is not executable on the SSH server.`,
-    "LLM Space will reinstall the remote runtime package once and retry the connection.",
+    "Check the remote install directory, permissions, and whether the runtime package was installed under a literal '~' directory.",
   ].join(" ");
 }
 

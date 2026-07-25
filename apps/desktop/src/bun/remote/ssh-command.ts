@@ -58,7 +58,7 @@ export function buildRemoteServerCommand(input: {
 }): string {
   return [
     "exec",
-    shellQuote(input.entrypoint),
+    shellPath(input.entrypoint),
     "--host",
     shellQuote(input.host),
     "--port",
@@ -66,7 +66,7 @@ export function buildRemoteServerCommand(input: {
     "--token",
     shellQuote(input.token),
     "--home",
-    shellQuote(input.home),
+    shellPath(input.home),
   ].join(" ");
 }
 
@@ -79,7 +79,7 @@ export function buildSourceRemoteServerCommand(input: {
 }): string {
   return [
     "cd",
-    shellQuote(input.remoteRepo),
+    shellPath(input.remoteRepo),
     "&&",
     "exec bun --filter @llm-space/server dev --",
     "--host",
@@ -89,8 +89,30 @@ export function buildSourceRemoteServerCommand(input: {
     "--token",
     shellQuote(input.token),
     "--home",
-    shellQuote(input.home),
+    shellPath(input.home),
   ].join(" ");
+}
+
+export function shellPath(value: string): string {
+  if (value === "~") {
+    return '"$HOME"';
+  }
+  if (value.startsWith("~/")) {
+    return `"$HOME"/${shellQuote(value.slice(2))}`;
+  }
+  return shellQuote(value);
+}
+
+export function joinRemotePath(base: string, ...parts: string[]): string {
+  const trimmedBase = base.replace(/\/+$/, "");
+  const trimmedParts = parts
+    .map((part) => part.replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean);
+  if (trimmedParts.length === 0) return trimmedBase || "/";
+  if (!trimmedBase || trimmedBase === "/") {
+    return `/${trimmedParts.join("/")}`;
+  }
+  return `${trimmedBase}/${trimmedParts.join("/")}`;
 }
 
 export function shellQuote(value: unknown): string {

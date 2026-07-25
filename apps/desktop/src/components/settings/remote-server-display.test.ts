@@ -6,7 +6,6 @@ import type {
 } from "@/shared/remote-servers";
 
 import {
-  remoteConnectionAction,
   remoteConnectionChecked,
   remoteConnectionDisabled,
   remoteConnectionFlow,
@@ -80,40 +79,6 @@ describe("remote server display helpers", () => {
     expect(remoteConnectionDisabled(server({ status: "error" }), false)).toBe(
       false
     );
-  });
-
-  test("derives explicit connection actions from connection status", () => {
-    expect(
-      remoteConnectionAction(server({ status: "disconnected" }), false)
-    ).toEqual({ label: "Connect", action: "connect", disabled: false });
-    expect(remoteConnectionAction(server({ status: "error" }), false)).toEqual({
-      label: "Connect",
-      action: "connect",
-      disabled: false,
-    });
-    expect(
-      remoteConnectionAction(server({ status: "connected" }), false)
-    ).toEqual({
-      label: "Disconnect",
-      action: "disconnect",
-      disabled: false,
-    });
-    expect(
-      remoteConnectionAction(server({ status: "connecting" }), false)
-    ).toEqual({ label: "Connecting", action: null, disabled: true });
-    expect(
-      remoteConnectionAction(server({ status: "trust-required" }), false)
-    ).toEqual({ label: "Trust required", action: null, disabled: true });
-    expect(
-      remoteConnectionAction(server({ status: "disconnected" }), true)
-    ).toEqual({ label: "Connect", action: "connect", disabled: true });
-    expect(
-      remoteConnectionAction(server({ status: "connected" }), true)
-    ).toEqual({
-      label: "Disconnect",
-      action: "disconnect",
-      disabled: true,
-    });
   });
 
   test("exposes connection flow steps from the server view", () => {

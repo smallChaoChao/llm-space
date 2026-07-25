@@ -4,10 +4,10 @@ import { REMOTE_RUNTIME_PROTOCOL_VERSION } from "@llm-space/runtime/remote-proto
 
 import { findFreePort } from "./port";
 import { spawnManagedProcess, type ManagedProcess } from "./process-utils";
+import { execRemoteCommand } from "./remote-exec";
 import { uploadRemoteFile } from "./remote-file-transfer";
 import { RemoteRuntimeClient } from "./remote-runtime-client";
 import {
-  cleanRemoteRuntimeInstallArtifacts,
   installRemoteServerPackage,
   RemoteServerInstallError,
   type RemoteServerInstallResult,
@@ -19,6 +19,9 @@ import {
   buildSourceRemoteServerCommand,
   buildSshBaseArgs,
   buildTunnelArgs,
+  joinRemotePath,
+  shellPath,
+  shellQuote,
 } from "./ssh-command";
 import {
   formatSshBootstrapFailure,
@@ -53,48 +56,16 @@ export async function startSshRemoteRuntime(
   const allProcesses: ManagedProcess[] = [];
 
   try {
-    let install = await _installRemoteServer(config, options);
-    try {
-      const started = await _startInstalledRuntime({
-        config,
-        install,
-        token,
-        localPort,
-        options,
-      });
-      allProcesses.push(...started.processes);
-      return _handle(started.client, allProcesses);
-    } catch (error) {
-      if (!parseMissingRuntimeBinaryFailure(_errorMessage(error))) {
-        throw error;
-      }
-      options.onProgress?.({
-        stage: "server-install",
-        message: "Remote runtime binary missing; reinstalling package",
-      });
-      await cleanRemoteRuntimeInstallArtifacts(config);
-      install = await _installRemoteServer(config, options);
-      try {
-        const retried = await _startInstalledRuntime({
-          config,
-          install,
-          token,
-          localPort,
-          options,
-        });
-        allProcesses.push(...retried.processes);
-        return _handle(retried.client, allProcesses);
-      } catch (retryError) {
-        throw new Error(
-          [
-            "Remote runtime binary was missing and reinstall retry failed.",
-            `Original failure: ${_errorMessage(error)}`,
-            `Retry failure: ${_errorMessage(retryError)}`,
-          ].join(" "),
-          { cause: retryError }
-        );
-      }
-    }
+    const install = await _installRemoteServer(config, options);
+    const started = await _startInstalledRuntime({
+      config,
+      install,
+      token,
+      localPort,
+      options,
+    });
+    allProcesses.push(...started.processes);
+    return _handle(started.client, allProcesses);
   } catch (error) {
     await Promise.all(allProcesses.map((process) => process.stop()));
     throw error;
@@ -212,8 +183,64 @@ async function _startInstalledRuntime(input: {
     return { client, processes };
   } catch (error) {
     await Promise.all(processes.map((process) => process.stop()));
-    throw error;
+    throw await _appendRemoteRuntimeDiagnostics(error, input);
   }
+}
+
+async function _appendRemoteRuntimeDiagnostics(
+  error: unknown,
+  input: {
+    config: SshRemoteRuntimeConfig;
+    install: RemoteServerInstallResult;
+  }
+): Promise<Error> {
+  const message = _errorMessage(error);
+  if (!parseMissingRuntimeBinaryFailure(message)) {
+    return error instanceof Error ? error : new Error(message);
+  }
+  const diagnostics = await _collectRemoteRuntimeDiagnostics(input).catch(
+    (diagnosticError) =>
+      `Remote diagnostics failed: ${_errorMessage(diagnosticError)}`
+  );
+  return new Error(`${message}\n\nRemote diagnostics:\n${diagnostics}`, {
+    cause: error,
+  });
+}
+
+async function _collectRemoteRuntimeDiagnostics(input: {
+  config: SshRemoteRuntimeConfig;
+  install: RemoteServerInstallResult;
+}): Promise<string> {
+  const installDir = input.config.remoteInstallDir;
+  const packageDir = joinRemotePath(installDir, "versions", input.install.version);
+  const manifestPath = joinRemotePath(packageDir, "server-manifest.json");
+  const binDir = joinRemotePath(packageDir, "bin");
+  const command = [
+    "set +e",
+    'printf "USER=%s\\nHOME=%s\\nPWD=%s\\n" "${USER:-}" "$HOME" "$PWD"',
+    `printf "entrypoint=%s\\ninstallDir=%s\\npackageDir=%s\\nremoteHome=%s\\n" ${shellQuote(
+      input.install.entrypoint
+    )} ${shellQuote(installDir)} ${shellQuote(packageDir)} ${shellQuote(
+      input.config.remoteHome
+    )}`,
+    "echo path_status:",
+    `ls -ld ${shellPath(installDir)} ${shellPath(
+      joinRemotePath(installDir, "versions")
+    )} ${shellPath(packageDir)} ${shellPath(binDir)} ${shellPath(
+      input.install.entrypoint
+    )} 2>&1`,
+    `test -e ${shellPath(input.install.entrypoint)}; echo entrypoint_exists:$?`,
+    `test -x ${shellPath(
+      input.install.entrypoint
+    )}; echo entrypoint_executable:$?`,
+    "echo manifest:",
+    `head -c 4096 ${shellPath(manifestPath)} 2>&1; echo`,
+    "echo literal_tilde_candidates:",
+    'ls -ld "$PWD/~" "$PWD/~/.llm-space" "$PWD/~/.llm-space/remote-runtime" 2>&1',
+    "true",
+  ].join("; ");
+  const result = await execRemoteCommand(input.config, command, 10_000);
+  return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
 }
 
 function _handle(

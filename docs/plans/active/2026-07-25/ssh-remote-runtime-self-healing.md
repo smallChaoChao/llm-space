@@ -285,3 +285,7 @@ export async function cleanRemoteRuntimeInstallArtifacts(
 ---
 
 [2026-07-25 20:31:00+08:00] 修改说明：完成 Milestone 3 和 Phase 5，更新中英文文档，运行相关单测、typecheck 和 diff check 均通过。
+
+---
+
+[2026-07-25 20:59:00+08:00] 修改说明：本计划中的 health-check missing binary 自动清理重装 retry 已被 `docs/plans/active/2026-07-25/remote-settings-connect-and-health-check-retry-removal.md` 取代，不再代表当前目标行为。后续目标是修复远端 `~` 路径展开、删除 health-check retry，并在失败时输出诊断快照。

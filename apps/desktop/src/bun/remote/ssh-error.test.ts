@@ -86,7 +86,8 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
     expect(message).toContain(
       "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server"
     );
-    expect(message).toContain("reinstall the remote runtime package once");
+    expect(message).toContain("literal '~' directory");
+    expect(message).not.toContain("will reinstall");
     expect(message).not.toContain("health-check");
   });
 
