@@ -71,6 +71,7 @@ console.info(
 function _optionValue(args: string[], name: string): string | undefined {
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
+    if (arg === undefined) continue;
     if (arg === name) return args[i + 1];
     if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1);
   }
