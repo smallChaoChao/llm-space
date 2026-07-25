@@ -6,6 +6,11 @@ import { findFreePort } from "./port";
 import { spawnManagedProcess, type ManagedProcess } from "./process-utils";
 import { execRemoteCommand } from "./remote-exec";
 import { uploadRemoteFile } from "./remote-file-transfer";
+import {
+  buildRemotePortOwnerProbeCommand,
+  buildStopRemotePortOwnerCommand,
+  parseRemotePortOwnerProbeOutput,
+} from "./remote-port-owner";
 import { RemoteRuntimeClient } from "./remote-runtime-client";
 import {
   installRemoteServerPackage,
@@ -26,6 +31,7 @@ import {
 import {
   formatSshBootstrapFailure,
   parseMissingRuntimeBinaryFailure,
+  parseRemotePortInUseFailure,
 } from "./ssh-error";
 
 export interface SshRemoteRuntimeHandle {
@@ -127,6 +133,29 @@ async function _startInstalledRuntime(input: {
   localPort: number;
   options: SshRemoteRuntimeOptions;
 }): Promise<{ client: RemoteRuntimeClient; processes: ManagedProcess[] }> {
+  let retriedPortRecovery = false;
+  while (true) {
+    try {
+      return await _startInstalledRuntimeOnce(input);
+    } catch (error) {
+      const portFailure = parseRemotePortInUseFailure(_errorMessage(error));
+      if (portFailure && !retriedPortRecovery) {
+        retriedPortRecovery = true;
+        await _recoverRemotePortInUse(input.config, input.options, portFailure.port);
+        continue;
+      }
+      throw await _appendRemoteRuntimeDiagnostics(error, input);
+    }
+  }
+}
+
+async function _startInstalledRuntimeOnce(input: {
+  config: SshRemoteRuntimeConfig;
+  install: RemoteServerInstallResult;
+  token: string;
+  localPort: number;
+  options: SshRemoteRuntimeOptions;
+}): Promise<{ client: RemoteRuntimeClient; processes: ManagedProcess[] }> {
   const processes: ManagedProcess[] = [];
   try {
     input.options.onProgress?.({
@@ -183,8 +212,51 @@ async function _startInstalledRuntime(input: {
     return { client, processes };
   } catch (error) {
     await Promise.all(processes.map((process) => process.stop()));
-    throw await _appendRemoteRuntimeDiagnostics(error, input);
+    throw error;
   }
+}
+
+async function _recoverRemotePortInUse(
+  config: SshRemoteRuntimeConfig,
+  options: SshRemoteRuntimeOptions,
+  port: number
+): Promise<void> {
+  if (port !== config.remoteServerPort) {
+    throw new Error(
+      `Remote runtime reported port ${port} in use, but this connection is configured for port ${config.remoteServerPort}.`
+    );
+  }
+  options.onProgress?.({
+    stage: "server-start",
+    message: "Checking stale remote runtime port owner",
+  });
+  const probe = await execRemoteCommand(
+    config,
+    buildRemotePortOwnerProbeCommand(config),
+    10_000
+  );
+  const owner = parseRemotePortOwnerProbeOutput(
+    [probe.stdout, probe.stderr].filter(Boolean).join("\n"),
+    config
+  );
+  if (owner.kind !== "llm-space") {
+    throw new Error(
+      [
+        `Remote runtime port ${port} is in use, but LLM Space could not verify it owns the listening process.`,
+        `Owner: ${owner.kind}.`,
+        owner.detail,
+      ].join(" ")
+    );
+  }
+  options.onProgress?.({
+    stage: "server-start",
+    message: "Restarting stale remote runtime server",
+  });
+  await execRemoteCommand(
+    config,
+    buildStopRemotePortOwnerCommand(owner.pid),
+    10_000
+  );
 }
 
 async function _appendRemoteRuntimeDiagnostics(

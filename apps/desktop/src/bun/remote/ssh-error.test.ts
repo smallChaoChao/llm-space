@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   formatSshBootstrapFailure,
   parseMissingRuntimeBinaryFailure,
+  parseRemotePortInUseFailure,
 } from "./ssh-error";
 
 describe("formatSshBootstrapFailure", () => {
@@ -111,6 +112,31 @@ Offending ECDSA key in /Users/bytedance/.ssh/known_hosts:6`;
       path: "/home/user/.llm-space/remote-runtime/versions/4.4.6-beta.6/bin/llm-space-server",
       reason: "not-executable",
     });
+  });
+
+  test("parses remote runtime port-in-use failures", () => {
+    expect(
+      parseRemotePortInUseFailure(
+        "SSH remote runtime bootstrap failed during health-check: remote server exited early. Failed to start server. Is port 39123 in use?"
+      )
+    ).toEqual({ port: 39123 });
+    expect(
+      parseRemotePortInUseFailure(
+        "EADDRINUSE: address already in use 127.0.0.1:39123"
+      )
+    ).toEqual({ port: 39123 });
+  });
+
+  test("formats remote runtime port-in-use failures", () => {
+    const message = formatSshBootstrapFailure({
+      stage: "health-check",
+      label: "remote server",
+      output:
+        "Failed to start server. Is port 39123 in use?",
+    });
+
+    expect(message).toContain("Remote runtime port 39123 is already in use");
+    expect(message).toContain("stale llm-space-server process");
   });
 
   test("classifies authentication failures", () => {

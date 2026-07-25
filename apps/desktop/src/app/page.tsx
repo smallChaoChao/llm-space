@@ -1,7 +1,7 @@
 import { FirecrawlLimitDialog } from "@llm-space/ui/components/firecrawl-limit-dialog";
 import {
+  ModelProvider,
   useModels,
-  useRefreshModels,
 } from "@llm-space/ui/components/model-provider";
 import {
   LOCAL_STORAGE_KEYS,
@@ -21,9 +21,13 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
+  type Dispatch,
+  type MutableRefObject,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { toast } from "sonner";
@@ -43,7 +47,10 @@ import { ThreadTabs, useThreadTabs } from "@/components/thread-tabs";
 import { UpdateIndicator } from "@/components/update-indicator";
 import { UpdateStatusProvider } from "@/components/update-status-provider";
 import { Welcome } from "@/components/welcome";
-import { DesktopHostProvider } from "@/host/host-services";
+import {
+  createElectrobunModelClient,
+  DesktopHostProvider,
+} from "@/host/host-services";
 import { track } from "@/lib/analytics";
 import { electrobun } from "@/lib/electrobun";
 import {
@@ -210,11 +217,59 @@ function writeSidebarSize(sizeInPixels: number): void {
   );
 }
 
+function threadTabId(path: string, runtimeId: RuntimeId): string {
+  return `thread:${runtimeId}:${path}`;
+}
+
 function PageInner() {
+  const [workspaceRuntimeId, setWorkspaceRuntimeId] =
+    useState<RuntimeId>("local");
+  const workspaceRuntimeIdRef = useRef<RuntimeId>("local");
+  useEffect(() => {
+    workspaceRuntimeIdRef.current = workspaceRuntimeId;
+  }, [workspaceRuntimeId]);
+
+  return (
+    <WorkspaceModelScope runtimeId={workspaceRuntimeId}>
+      <PageWorkspace
+        workspaceRuntimeId={workspaceRuntimeId}
+        setWorkspaceRuntimeId={setWorkspaceRuntimeId}
+        workspaceRuntimeIdRef={workspaceRuntimeIdRef}
+      />
+    </WorkspaceModelScope>
+  );
+}
+
+function WorkspaceModelScope({
+  runtimeId,
+  children,
+}: {
+  runtimeId: RuntimeId;
+  children: ReactNode;
+}) {
+  const client = useMemo(
+    () => createElectrobunModelClient(runtimeId),
+    [runtimeId]
+  );
+  return (
+    <ModelProvider key={runtimeId} client={client}>
+      {children}
+    </ModelProvider>
+  );
+}
+
+function PageWorkspace({
+  workspaceRuntimeId,
+  setWorkspaceRuntimeId,
+  workspaceRuntimeIdRef,
+}: {
+  workspaceRuntimeId: RuntimeId;
+  setWorkspaceRuntimeId: Dispatch<SetStateAction<RuntimeId>>;
+  workspaceRuntimeIdRef: MutableRefObject<RuntimeId>;
+}) {
   const tabs = useThreadTabs();
   const { executeCommand } = useCommands();
   const models = useModels();
-  const refreshModels = useRefreshModels();
   const queryClient = useQueryClient();
   const { tracingEnabled } = useExperimental();
 
@@ -262,12 +317,6 @@ function PageInner() {
   // The thread path being shared (a specific file, or the resolved active tab).
   const shareTargetRef = useRef("");
   const [sidebarMode, setSidebarMode] = useState<"files" | "traces">("files");
-  const [workspaceRuntimeId, setWorkspaceRuntimeId] =
-    useState<RuntimeId>("local");
-  const workspaceRuntimeIdRef = useRef<RuntimeId>("local");
-  useEffect(() => {
-    workspaceRuntimeIdRef.current = workspaceRuntimeId;
-  }, [workspaceRuntimeId]);
   // Which folder a chosen example's thread is created into (default: root).
   const examplesParentRef = useRef("");
 
@@ -285,9 +334,8 @@ function PageInner() {
       setSidebarMode("files");
       void queryClient.invalidateQueries({ queryKey: ["fs"] });
       void queryClient.invalidateQueries({ queryKey: ["thread"] });
-      void refreshModels();
     },
-    [closeRuntime, queryClient, refreshModels]
+    [closeRuntime, queryClient, setWorkspaceRuntimeId, workspaceRuntimeIdRef]
   );
 
   const refreshRuntimes = useCallback(
@@ -310,7 +358,7 @@ function PageInner() {
         setWorkspaceRuntimeId(nextRuntimeId);
       }
     },
-    [switchWorkspaceRuntime]
+    [setWorkspaceRuntimeId, switchWorkspaceRuntime, workspaceRuntimeIdRef]
   );
 
   const transitionWorkspaceRuntime = useCallback(
@@ -335,46 +383,54 @@ function PageInner() {
   // parent directory it should import into, and page-wide drag-and-drop state.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingParentRef = useRef("");
+  const pendingImportRuntimeIdRef = useRef<RuntimeId>("local");
   const dragDepthRef = useRef(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const { open: openTab } = tabs;
   const handleImportFiles = useCallback(
-    async (files: FileList | File[] | ThreadImportFile[], parent: string) => {
+    async (
+      files: FileList | File[] | ThreadImportFile[],
+      parent: string,
+      runtimeId: RuntimeId = workspaceRuntimeIdRef.current
+    ) => {
       const list = [...files];
       if (list.length === 0) return;
       const { created, total } =
         list[0] instanceof File
-          ? await importThreadFiles(parent, list as File[], models)
+          ? await importThreadFiles(parent, list as File[], models, runtimeId)
           : await importThreadFileRecords(
               parent,
               list as ThreadImportFile[],
-              models
+              models,
+              runtimeId
             );
       if (created.length === 0) {
         toast.error("No threads could be imported from the selected files.");
         return;
       }
-      executeCommand({ type: "refreshTree", args: {} });
-      for (const path of created) openTab(path);
+      executeCommand({ type: "refreshTree", args: { runtimeId } });
+      for (const path of created) openTab(path, runtimeId);
       const skipped = total - created.length;
       toast.success(
         `Imported ${created.length} thread${created.length === 1 ? "" : "s"}`,
         skipped > 0 ? { description: `${skipped} file(s) skipped` } : undefined
       );
     },
-    [models, executeCommand, openTab]
+    [models, executeCommand, openTab, workspaceRuntimeIdRef]
   );
 
   // Register the command handlers backed by page-level state (tabs, sidebar,
   // settings). `newFile` / `newFolder` / the tree ops are registered by the
   // file tree, which owns that state.
   useRegisterCommands({
-    closeTab: ({ id, path }) => {
-      const target = id ?? (path ? `thread:${path}` : activeTabIdRef.current);
+    closeTab: ({ id, path, runtimeId }) => {
+      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
+      const target = id ?? (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
       if (target) close(target);
     },
-    closeOtherTabs: ({ id, path }) => {
-      const target = id ?? (path ? `thread:${path}` : activeTabIdRef.current);
+    closeOtherTabs: ({ id, path, runtimeId }) => {
+      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
+      const target = id ?? (path ? threadTabId(path, targetRuntimeId) : activeTabIdRef.current);
       if (target) closeOthers(target);
     },
     closeAllTabs: () => closeAll(),
@@ -398,7 +454,8 @@ function PageInner() {
       setExamplesOpen(true);
     },
     // Share a specific thread, or the active thread when no path is given (the
-    // header button / native menu / palette). The active tab id is `thread:{path}`.
+    // header button / native menu / palette). Thread tab ids are
+    // `thread:{runtimeId}:{path}`.
     shareThread: ({ path, runtimeId }) => {
       const targetRuntimeId = runtimeId ?? workspaceRuntimeId;
       if (targetRuntimeId !== workspaceRuntimeId) return;
@@ -414,12 +471,14 @@ function PageInner() {
       setShareOpen(true);
     },
     importFiles: ({ parent = "", files, runtimeId }) => {
-      if (runtimeId && runtimeId !== workspaceRuntimeId) return;
+      const targetRuntimeId = runtimeId ?? workspaceRuntimeIdRef.current;
+      if (targetRuntimeId !== workspaceRuntimeIdRef.current) return;
       if (files) {
-        void handleImportFiles(files, parent);
+        void handleImportFiles(files, parent, targetRuntimeId);
         return;
       }
       pendingParentRef.current = parent;
+      pendingImportRuntimeIdRef.current = targetRuntimeId;
       fileInputRef.current?.click();
     },
   });
@@ -523,7 +582,11 @@ function PageInner() {
         e.preventDefault();
         dragDepthRef.current = 0;
         setIsDraggingFiles(false);
-        void handleImportFiles(e.dataTransfer.files, "");
+        void handleImportFiles(
+          e.dataTransfer.files,
+          "",
+          workspaceRuntimeIdRef.current
+        );
       }}
     >
       <SharedImportProvider />
@@ -537,7 +600,11 @@ function PageInner() {
         onChange={(e) => {
           const files = e.target.files;
           if (files?.length) {
-            void handleImportFiles(files, pendingParentRef.current);
+            void handleImportFiles(
+              files,
+              pendingParentRef.current,
+              pendingImportRuntimeIdRef.current
+            );
           }
           e.target.value = "";
         }}

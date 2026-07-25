@@ -75,6 +75,8 @@ Before reusing an installed remote runtime package, LLM Space verifies both `ser
 
 The default install directory `~/.llm-space/remote-runtime` is resolved on the SSH server as that user's `$HOME/.llm-space/remote-runtime`; it is not resolved on the local machine, and it must not create a literal `~/` directory on the server. Startup and health-check failures do not trigger an automatic reinstall retry. If `bin/llm-space-server` is missing or not executable after installation, LLM Space reports the failure with a best-effort remote diagnostic snapshot covering `$HOME`, `PWD`, the install directory, entrypoint existence, execute permission, manifest content, and possible literal `~/` install artifacts. Check install directory permissions, disk space, external cleanup jobs, and any stale literal `~/` directory before reconnecting.
 
+If startup or health check reports that the remote runtime port, usually `39123`, is already in use, LLM Space checks whether the listener is a stale `llm-space-server` from the same remote install directory, for example `~/.llm-space/remote-runtime/versions/<old-version>/bin/llm-space-server --host 127.0.0.1 --port 39123`. When that ownership is verified, LLM Space stops that stale server and retries the current connection once. It does not stop unknown or non-LLM Space processes; in that case, inspect the process on the SSH host and stop it manually before reconnecting.
+
 ## Host key verification failures
 
 OpenSSH protects you from connecting to a host whose identity is unknown or changed. LLM Space handles those cases separately.

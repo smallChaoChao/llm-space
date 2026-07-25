@@ -19,6 +19,10 @@ export interface MissingRuntimeBinaryFailure {
   reason: "missing" | "not-executable";
 }
 
+export interface RemotePortInUseFailure {
+  port: number;
+}
+
 const MAX_GENERIC_OUTPUT_LENGTH = 1200;
 
 export function formatSshBootstrapFailure({
@@ -29,6 +33,9 @@ export function formatSshBootstrapFailure({
 }: SshBootstrapFailureInput): string {
   const missingRuntime = _formatMissingRuntimeBinary(output);
   if (missingRuntime) return missingRuntime;
+
+  const portInUse = _formatRemotePortInUse(output);
+  if (portInUse) return portInUse;
 
   const hostKeyFailure = _formatHostKeyFailure(output, target, stage);
   if (hostKeyFailure) return hostKeyFailure;
@@ -43,6 +50,49 @@ export function formatSshBootstrapFailure({
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function _formatRemotePortInUse(output: string): string | null {
+  const failure = parseRemotePortInUseFailure(output);
+  if (!failure) return null;
+  return [
+    `Remote runtime port ${failure.port} is already in use.`,
+    "LLM Space will try to stop a stale llm-space-server process on that SSH host and retry once.",
+    "If the port belongs to another process, stop that process manually or choose a different remote server port.",
+  ].join(" ");
+}
+
+export function parseRemotePortInUseFailure(
+  output: string
+): RemotePortInUseFailure | null {
+  const port = _parsePortInUsePort(output);
+  if (!port) return null;
+  if (
+    /EADDRINUSE/i.test(output) ||
+    /address already in use/i.test(output) ||
+    /port\s+\d+\s+(?:is\s+)?(?:already\s+)?(?:in use|used)/i.test(output) ||
+    /is port\s+\d+\s+in use\?/i.test(output)
+  ) {
+    return { port };
+  }
+  return null;
+}
+
+function _parsePortInUsePort(output: string): number | null {
+  const patterns = [
+    /port\s+(\d+)\s+(?:is\s+)?(?:already\s+)?(?:in use|used)/i,
+    /is port\s+(\d+)\s+in use\?/i,
+    /127\.0\.0\.1:(\d+)/i,
+    /:(\d+)\s*$/m,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(output);
+    const port = match ? Number(match[1]) : 0;
+    if (Number.isInteger(port) && port >= 1 && port <= 65535) {
+      return port;
+    }
+  }
+  return null;
 }
 
 function _formatMissingRuntimeBinary(output: string): string | null {

@@ -95,4 +95,21 @@ describe("remote server display helpers", () => {
     expect(remoteConnectionFlow(server({ steps }))).toEqual(steps);
     expect(remoteConnectionFlow(server({}))).toEqual([]);
   });
+
+  test("hides connection flow after a server is connected", () => {
+    expect(
+      remoteConnectionFlow(
+        server({
+          status: "connected",
+          steps: [
+            {
+              stage: "connected",
+              label: "Connected",
+              status: "success",
+            },
+          ],
+        })
+      )
+    ).toEqual([]);
+  });
 });

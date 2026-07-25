@@ -103,6 +103,46 @@ describe("RemoteServerManager", () => {
     );
   });
 
+  test("disconnects an existing server before connecting the same SSH target and port", async () => {
+    const events: string[] = [];
+    const manager = _manager((config) => {
+      events.push(`start:${config.host}:${config.user ?? ""}`);
+      return Promise.resolve({
+        client: _remoteRuntime(config.id),
+        stop: () => {
+          events.push(`stop:${config.host}:${config.user ?? ""}`);
+          return Promise.resolve();
+        },
+      });
+    });
+
+    const [host1] = manager.addServer({
+      name: "host1",
+      host: "same-host",
+      user: "user",
+    });
+    const host2 = manager.addServer({
+      name: "host2",
+      host: "same-host",
+      user: "user",
+    })[1];
+
+    await manager.connectServer(host1.id);
+    const next = await manager.connectServer(host2.id);
+
+    expect(events).toEqual([
+      "start:same-host:user",
+      "stop:same-host:user",
+      "start:same-host:user",
+    ]);
+    expect(next.find((server) => server.id === host1.id)?.status).toBe(
+      "disconnected"
+    );
+    expect(next.find((server) => server.id === host2.id)?.status).toBe(
+      "connected"
+    );
+  });
+
   test("keeps the previous SSH server connected when connecting a second server fails", async () => {
     const stopped: string[] = [];
     const manager = _manager((config) => {

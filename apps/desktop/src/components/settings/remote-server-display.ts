@@ -43,5 +43,6 @@ export function remoteConnectionDisabled(
 export function remoteConnectionFlow(
   server: RemoteServerView
 ): RemoteConnectionStepView[] {
+  if (server.status === "connected") return [];
   return server.steps ?? [];
 }

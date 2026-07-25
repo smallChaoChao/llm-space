@@ -75,6 +75,8 @@ Remote Servers 页面还会展示 **Connection flow** 时间线，包含 SSH、H
 
 默认安装目录 `~/.llm-space/remote-runtime` 会在 SSH 服务器上解析为该用户的 `$HOME/.llm-space/remote-runtime`；它不会在本机解析，也不应该在服务器上创建字面量 `~/` 目录。启动或 health check 失败不会触发自动重装 retry。如果安装后 `bin/llm-space-server` 缺失或不可执行，LLM Space 会直接报错，并附带 best-effort 远端诊断快照，包括 `$HOME`、`PWD`、安装目录、entrypoint 是否存在、是否可执行、manifest 内容，以及可能存在的字面量 `~/` 安装产物。重新连接前，优先检查安装目录权限、磁盘空间、外部清理任务和遗留的字面量 `~/` 目录。
 
+如果启动或 health check 报远端 runtime 端口已被占用，通常是 `39123`，LLM Space 会检查监听进程是否是同一远端安装目录下遗留的 `llm-space-server`，例如 `~/.llm-space/remote-runtime/versions/<old-version>/bin/llm-space-server --host 127.0.0.1 --port 39123`。确认归属后，LLM Space 会停止这个 stale server，并对当前连接重试一次。LLM Space 不会停止无法确认归属或非 LLM Space 的进程；这种情况下请先在 SSH 目标机器上手动检查并停止占用进程，再重新连接。
+
 ## Host key 校验失败
 
 OpenSSH 会阻止你连接身份未知或身份发生变化的主机。LLM Space 会把这两类情况分开处理。

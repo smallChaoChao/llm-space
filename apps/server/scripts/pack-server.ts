@@ -18,6 +18,8 @@ interface PackOptions {
   outDir: string;
 }
 
+type BunCompileTarget = "bun-linux-x64" | "bun-linux-arm64";
+
 const REPO_ROOT = path.resolve(import.meta.dir, "../../..");
 const SERVER_ROOT = path.join(REPO_ROOT, "apps/server");
 
@@ -35,7 +37,10 @@ async function main(): Promise<void> {
   await mkdir(path.dirname(binaryPath), { recursive: true });
   await mkdir(artifactsDir, { recursive: true });
 
-  await Bun.$`bun build ${path.join(SERVER_ROOT, "src/index.ts")} --compile --outfile ${binaryPath}`.cwd(
+  await Bun.$`bun build ${path.join(
+    SERVER_ROOT,
+    "src/index.ts"
+  )} --compile --target ${bunCompileTarget(options)} --outfile ${binaryPath}`.cwd(
     REPO_ROOT
   );
 
@@ -94,6 +99,19 @@ function _parseArgs(argv: string[]): PackOptions {
   return { os: targetOs, arch: targetArch, outDir };
 }
 
+export function bunCompileTarget(input: {
+  os: RemoteServerPackageOs;
+  arch: RemoteServerPackageArch;
+}): BunCompileTarget {
+  if (input.os === "linux" && input.arch === "x64") {
+    return "bun-linux-x64";
+  }
+  if (input.os === "linux" && input.arch === "arm64") {
+    return "bun-linux-arm64";
+  }
+  throw new Error(`Unsupported Bun compile target: ${input.os}-${input.arch}`);
+}
+
 function _defaultTarget(): string {
   const platform = os.platform();
   const arch = os.arch();
@@ -116,7 +134,9 @@ async function _sha256(filePath: string): Promise<string> {
   return createHash("sha256").update(Buffer.from(bytes)).digest("hex");
 }
 
-void main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (import.meta.main) {
+  void main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

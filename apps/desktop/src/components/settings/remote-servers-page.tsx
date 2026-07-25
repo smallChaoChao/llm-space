@@ -44,10 +44,7 @@ import type {
 } from "@/shared/remote-servers";
 import type { RuntimeId } from "@/shared/runtime";
 
-import {
-  remoteConnectionFlow,
-  remoteStageSummary,
-} from "./remote-server-display";
+import { remoteConnectionFlow } from "./remote-server-display";
 import { SettingsPage } from "./settings-page";
 
 interface FormState {
@@ -293,7 +290,11 @@ export function RemoteServersPage({
                         </span>
                       </span>
                     </button>
-                    {server.status === "trust-required" ? (
+                    {server.status === "connected" ? (
+                      <span className="border-primary bg-primary/15 text-primary flex size-4 shrink-0 items-center justify-center rounded-full border">
+                        <Check className="size-3" />
+                      </span>
+                    ) : server.status === "trust-required" ? (
                       <ShieldAlert className="size-4 shrink-0 text-amber-500" />
                     ) : busyId === server.id ||
                       server.status === "connecting" ? (
@@ -370,8 +371,6 @@ function RemoteServerDetails({
   onRejectHostKey: (request: RemoteHostKeyTrustRequest) => void;
   trustBusy: boolean;
 }) {
-  const progress = remoteStageSummary(server);
-  const progressTitle = server.stageLabel ?? progress ?? undefined;
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
@@ -385,9 +384,6 @@ function RemoteServerDetails({
       </div>
       <div className="grid gap-2 rounded-lg border p-3 text-sm">
         <Info label="Status" value={server.status} />
-        {progress ? (
-          <Info label="Progress" value={progress} title={progressTitle} />
-        ) : null}
         <Info label="Runtime" value={server.runtimeId} />
         <Info label="Workspace" value={_remoteWorkspacePath(server)} />
       </div>

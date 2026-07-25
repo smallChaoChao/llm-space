@@ -145,6 +145,8 @@ export class RemoteServerManager {
       return this.listServers();
     }
 
+    await this._disconnectConflictingConnectedServersBeforeConnect(server);
+
     this._setConnection(id, {
       status: "connecting",
       stage: "ssh-check",
@@ -284,6 +286,22 @@ export class RemoteServerManager {
             // not turn a successful connection switch into a failed connect.
           }
         })
+    );
+  }
+
+  private async _disconnectConflictingConnectedServersBeforeConnect(
+    target: RemoteServerConfig
+  ): Promise<void> {
+    await Promise.all(
+      [...this._connections.entries()]
+        .filter(([id, connection]) => {
+          if (id === target.id || connection.status !== "connected") {
+            return false;
+          }
+          const current = this._servers.find((server) => server.id === id);
+          return current ? _sameRemoteEndpoint(current, target) : false;
+        })
+        .map(([id]) => this._disconnectServer(id))
     );
   }
 
@@ -554,6 +572,17 @@ function _updateConnectionSteps(
 function _optional(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function _sameRemoteEndpoint(
+  left: RemoteServerConfig,
+  right: RemoteServerConfig
+): boolean {
+  return (
+    left.host === right.host &&
+    (left.user ?? "") === (right.user ?? "") &&
+    left.remoteServerPort === right.remoteServerPort
+  );
 }
 
 function _port(
