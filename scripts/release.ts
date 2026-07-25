@@ -54,16 +54,18 @@ await $`bunx commit-and-tag-version ${args}`;
 
 if (isDryRun) process.exit(0);
 
-// --atomic: all-or-nothing — if the branch is rejected (e.g. someone pushed in
-// the meantime), the tag must not land alone and trigger a release off an orphan.
-await $`git push --atomic --follow-tags origin ${branch}`;
-
 const { version } = (await Bun.file("apps/desktop/package.json").json()) as {
   version: string;
 };
+const tag = `v${version}`;
+
+// --atomic: all-or-nothing — if the branch is rejected (e.g. someone pushed in
+// the meantime), the tag must not land alone and trigger a release off an orphan.
+await $`git push --atomic origin ${branch} ${`refs/tags/${tag}`}`;
+
 const repo = await _originRepo();
 console.info(
-  `\n✔ v${version} pushed — release CI: https://github.com/${repo}/actions`
+  `\n✔ ${tag} pushed — release CI: https://github.com/${repo}/actions`
 );
 
 function _optionValue(args: string[], name: string): string | undefined {
@@ -88,9 +90,24 @@ async function _upstreamRef(branch: string): Promise<string | null> {
 async function _originRepo(): Promise<string> {
   try {
     const url = (await $`git remote get-url origin`.text()).trim();
-    const sshMatch = /github\.com[:/]([^/]+\/[^/.]+)(?:\.git)?$/.exec(url);
-    return sshMatch?.[1] ?? "deer-flow/llm-space";
+    return _repoFromRemoteUrl(url) ?? "deer-flow/llm-space";
   } catch {
     return "deer-flow/llm-space";
   }
+}
+
+function _repoFromRemoteUrl(url: string): string | null {
+  const scpLike = /^[^@]+@[^:]+:(?<repo>[^/]+\/[^/]+?)(?:\.git)?$/.exec(url);
+  if (scpLike?.groups?.repo) return scpLike.groups.repo;
+
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.replace(/^\/+|\.git$/g, "").split("/");
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      return `${parts[0]}/${parts[1]}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
