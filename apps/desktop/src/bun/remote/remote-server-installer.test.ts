@@ -215,7 +215,7 @@ describe("remote server installer", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toMatch(
-        /Remote runtime package download timed out after 300000ms\. Package URL: https:\/\/github\.com\/deer-flow\/llm-space\/releases\/download\//
+        /Remote runtime package download timed out after 300000ms\. Package URL: https:\/\/github\.com\/smallChaoChao\/llm-space\/releases\/download\//
       );
       expect((error as Error).message).toMatch(
         /Remote runtime package download timed out after 300000ms\..*Check remote network access with: ssh host/s
@@ -255,7 +255,7 @@ describe("remote server installer", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toMatch(
-        /Remote runtime package download timed out after 120000ms\. Package URL: https:\/\/github\.com\/deer-flow\/llm-space\/releases\/download\//
+        /Remote runtime package download timed out after 120000ms\. Package URL: https:\/\/github\.com\/smallChaoChao\/llm-space\/releases\/download\//
       );
     }
   });

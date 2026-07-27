@@ -44,7 +44,7 @@ export function serverPackageAssetUrl(input: {
   if (baseUrl) {
     return `${baseUrl}/${assetName}`;
   }
-  const ownerRepo = input.ownerRepo ?? "deer-flow/llm-space";
+  const ownerRepo = input.ownerRepo ?? "smallChaoChao/llm-space";
   return `https://github.com/${ownerRepo}/releases/download/v${input.target.version}/${assetName}`;
 }
 
