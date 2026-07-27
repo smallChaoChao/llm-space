@@ -140,7 +140,28 @@ jobs:
       - name: Disable Spotlight indexing (hdiutil "Resource busy")
         run: sudo mdutil -a -i off || true
 
+      - name: Detect macOS signing secrets
+        id: signing
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          if [ -n "$MACOS_CERTIFICATE_P12" ] && \
+             [ -n "$MACOS_CERTIFICATE_PWD" ] && \
+             [ -n "$ASC_API_KEY_P8" ] && \
+             [ -n "$ASC_API_KEY_ID" ] && \
+             [ -n "$ASC_API_ISSUER_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "macOS signing secrets are incomplete; building unsigned artifacts for fork testing."
+          fi
+
       - name: Import signing certificate
+        if: steps.signing.outputs.enabled == 'true'
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
@@ -179,25 +200,34 @@ jobs:
           ELECTROBUN_APPLEAPIKEY: ${{ secrets.ASC_API_KEY_ID }}
           ELECTROBUN_APPLEAPIISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
           CHANNEL: ${{ needs.meta.outputs.channel }}
+          # Forks usually do not have Apple's Developer ID and App Store Connect
+          # secrets. In that case, still build release artifacts, but skip
+          # signing/notarization so fork maintainers can test the packaging path.
+          LLM_SPACE_SKIP_SIGNING: ${{ steps.signing.outputs.enabled == 'true' && '' || '1' }}
           # The edition's only build-time switch: electrobun.config.ts forks the
           # app name, identifier and update feed off it. Empty = regular edition.
           LLM_SPACE_DESKTOP_RENDERER: ${{ matrix.edition == 'performance' && 'cef' || '' }}
         run: mise run "build:$CHANNEL"
 
-      - name: Smoke test the signed app
+      - name: Smoke test the app
         working-directory: apps/desktop
         env:
           CHANNEL: ${{ needs.meta.outputs.channel }}
           ARCH: ${{ matrix.arch }}
+          MACOS_SIGNING_ENABLED: ${{ steps.signing.outputs.enabled }}
         run: |
           APP="$(find "build/$CHANNEL-macos-$ARCH" -maxdepth 1 -name '*.app' | head -1)"
           if [ -z "$APP" ]; then
             echo "::error::no .app bundle found in build/$CHANNEL-macos-$ARCH"
             exit 1
           fi
-          codesign --verify --deep --strict "$APP"
-          spctl -a -t exec -vv "$APP"
-          xcrun stapler validate "$APP"
+          if [ "$MACOS_SIGNING_ENABLED" = "true" ]; then
+            codesign --verify --deep --strict "$APP"
+            spctl -a -t exec -vv "$APP"
+            xcrun stapler validate "$APP"
+          else
+            echo "Skipping codesign, Gatekeeper, and stapler checks for unsigned fork build."
+          fi
           # The bundle left in build/ is the self-extracting installer wrapper
           # (the real app only exists inside the tar.zst): on first launch it
           # swaps the real app into the same bundle path and relaunches it. This
